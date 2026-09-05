@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(exchange
     src/main.cpp
+    src/order_book.cpp
+    src/matching_engine.cpp
 )
 
 target_include_directories(exchange PRIVATE include)
