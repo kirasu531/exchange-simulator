@@ -1,0 +1,18 @@
+17
+add sell 101 105 5
+add sell 102 103 4
+add sell 103 103 6
+add buy 104 102 10
+get 104
+add buy 105 104 8
+get 103
+add buy 106 106 10
+get 106
+add sell 107 105 2
+get 106
+rmv 106
+add sell 108 105 2
+get 108
+add buy 109 105 4
+get 109
+get 104
