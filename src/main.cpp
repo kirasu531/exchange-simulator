@@ -1,4 +1,4 @@
-#include "order_book.hpp"
+#include "matching_engine.hpp"
 
 #include <string>
 #include <iostream>
@@ -10,31 +10,51 @@ int getTime(){ return cntTime++; }
 int main(){
     int t; std::cin >> t;
 
-    OrderBook exchange;
+    MatchingEngine engine;
 
     while ( t-- ){
         std::string op; std::cin >> op;
 
         if ( op == "add" ){
-            std::string type; int id, price, quantity; std::cin >> type >> id >> price >> quantity;
+            int orderId;
+            int arrivalTime = getTime();
+            int price;
+            int quantity;
+            std::string side;
+            std::string instrument;
 
-            exchange.AddOrder(Order{
-                .orderId = id, 
-                .arrivalTime = getTime(), 
+            std::cin >> orderId >> 
+            price >> 
+            quantity >>
+            side >>
+            instrument;  
+
+            engine.AddOrder(Order{
+                .orderId = orderId, 
+                .arrivalTime = arrivalTime, 
                 .price = price,
                 .quantity = quantity,
-                .side = type == "buy" ? Side::Buy : Side::Sell
-            }); 
+                .side = side == "buy" ? Side::Buy : Side::Sell,
+                .instrument = instrument
+            });
         } else if ( op == "rmv" ){
-            int id; std::cin >> id;
+            int Id; 
+            
+            std::cin >> Id;
 
-            exchange.RemoveOrder(id);
-        } else{
-            int id; std::cin >> id;
+            engine.CancelOrder(Id);
+        } else if ( op == "get" ){
+            int Id; 
+            
+            std::cin >> Id;
 
-            exchange.GetOrder(id).print();
+            auto curOrder = engine.GetOrder(Id);
+
+            if ( curOrder ){
+                engine.GetOrder(Id) -> print();
+            }
         }
     }
 
-    exchange.PrintLog();
+    engine.PrintTrades();
 }

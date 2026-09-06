@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 #include <string>
+#include <optional>
 
 enum class Side{
     Buy,
@@ -33,6 +34,6 @@ struct OrderBook{
 
     void AddOrder(const Order &newOrder);
     void RemoveOrder(int Id);
-    Order GetOrder(int Id);
+    std::optional<Order> GetOrder(int Id);
     void PrintLog();
 };

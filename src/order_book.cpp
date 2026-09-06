@@ -51,6 +51,7 @@ void OrderBook::AddOrder(const Order &newOrder){
             active_orders.erase(cur.orderId);
 
             trades.push_back(Trade{
+                .tradeTime = incoming.arrivalTime,
                 .buyerId = incoming.orderId,
                 .sellerId = cur.orderId,
                 .instrument = cur.instrument,
@@ -83,6 +84,7 @@ void OrderBook::AddOrder(const Order &newOrder){
             active_orders.erase(cur.orderId);
 
             trades.push_back(Trade{
+                .tradeTime = incoming.arrivalTime,
                 .buyerId = cur.orderId,
                 .sellerId = incoming.orderId,
                 .instrument = cur.instrument,
@@ -124,7 +126,7 @@ void OrderBook::RemoveOrder(int Id){
     auto iter = active_orders.find(Id);
     
     if ( iter != active_orders.end() ){
-        auto cur = active_orders[Id];
+        auto cur = iter -> second;
 
         if ( cur.side == Side::Buy ){
             buy_list.erase(cur);
@@ -132,18 +134,27 @@ void OrderBook::RemoveOrder(int Id){
             sell_list.erase(cur);
         }
 
-        active_orders.erase(Id);
+        active_orders.erase(iter);
     }
 }
 
-Order OrderBook::GetOrder(int Id){
+std:: optional <Order> OrderBook::GetOrder(int Id){
     auto iter = active_orders.find(Id);
 
-    return iter != active_orders.end() ? active_orders[Id] : Order();
+    if ( iter != active_orders.end() ){
+        return iter -> second;
+    }
+        
+    return std::nullopt;
 }
 
 void OrderBook::PrintLog(){
-    for ( auto &[buyerId, sellerId, instrument, price, quantity]: trades ){
-        std::cout << buyerId << ' ' << sellerId << ' ' << instrument << ' ' << price << ' ' << quantity << '\n';
+    for ( auto &[tradeTime, buyerId, sellerId, instrument, price, quantity]: trades ){
+        std::cout << tradeTime << ' '  
+        << buyerId << ' ' 
+        << sellerId << ' ' 
+        << instrument << ' ' 
+        << price << ' ' 
+        << quantity << '\n';
     }
 }
