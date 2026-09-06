@@ -6,15 +6,21 @@
 
 void MatchingEngine::AddOrder(const Order &newOrder){
     if ( used_Ids.find(newOrder.orderId) != used_Ids.end() ) return;
-    
-    type[newOrder.orderId] = newOrder.instrument;
-    used_Ids.insert(newOrder.orderId);
 
-    if ( groups.find(newOrder.instrument) == groups.end() ){
-        groups[newOrder.instrument] = OrderBook();
+    if ( IsValidOrder(newOrder) == false ) return;
+    
+    auto incoming = newOrder;
+
+    incoming.arrivalSequence = nextSequence++;
+    
+    type[incoming.orderId] = incoming.instrument;
+    used_Ids.insert(incoming.orderId);
+
+    if ( groups.find(incoming.instrument) == groups.end() ){
+        groups[incoming.instrument] = OrderBook();
     }
 
-    groups[newOrder.instrument].AddOrder(newOrder);
+    groups[incoming.instrument].AddOrder(incoming);
 }
 
 void MatchingEngine::CancelOrder(int Id){
@@ -39,7 +45,7 @@ void MatchingEngine::PrintTrades(){
     }
 
     sort(begin(trade_log), end(trade_log), [&](const Trade &tradeA, const Trade &tradeB){
-        return tradeA.tradeTime < tradeB.tradeTime;
+        return tradeA.tradeSequence < tradeB.tradeSequence;
     });
 
     for ( auto &trade: trade_log ){

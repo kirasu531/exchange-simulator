@@ -3,10 +3,6 @@
 #include <string>
 #include <iostream>
 
-int cntTime = 0;
-
-int getTime(){ return cntTime++; }
-
 int main(){
     int t; std::cin >> t;
 
@@ -17,7 +13,6 @@ int main(){
 
         if ( op == "add" ){
             int orderId;
-            int arrivalTime = getTime();
             int price;
             int quantity;
             std::string side;
@@ -30,11 +25,11 @@ int main(){
             instrument;  
 
             engine.AddOrder(Order{
-                .orderId = orderId, 
-                .arrivalTime = arrivalTime, 
+                .orderId = orderId,
                 .price = price,
                 .quantity = quantity,
                 .side = side == "buy" ? Side::Buy : Side::Sell,
+                .type = OrderType::Limit,
                 .instrument = instrument
             });
         } else if ( op == "rmv" ){

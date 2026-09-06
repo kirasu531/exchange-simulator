@@ -3,7 +3,7 @@
 #include <iostream>
 
 struct Trade{
-    int tradeTime = 0;
+    int tradeSequence = 0;
     int buyerId = -1;
     int sellerId = -1;
     std::string instrument = "null";
@@ -11,7 +11,7 @@ struct Trade{
     int quantity = 0;
 
     void printTrade(){
-        std::cout << tradeTime << ' ' 
+        std::cout << tradeSequence << ' ' 
         << buyerId << ' ' 
         << sellerId << ' ' 
         << instrument << ' ' 

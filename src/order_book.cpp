@@ -3,37 +3,51 @@
 
 void Order::print(){
     std::cout << orderId << ' ' 
-    << arrivalTime << ' ' 
+    << arrivalSequence << ' ' 
     << price << ' ' 
     << quantity << ' ' 
     << (side == Side::Buy ? "Buy" : "Sell") << ' ' 
     << instrument << '\n';
 }
 
-bool operator <(const Order &First, const Order &Second){
-    assert(First.side == Second.side);
+bool IsValidOrder(const Order &order){
+    if ( order.orderId < 0 ) return false;
+    if ( order.arrivalSequence < 0 ) return false;
+    if ( order.price <= 0 ) return false;
+    if ( order.quantity <= 0 ) return false;
+    if ( order.instrument.empty() ) return false;
 
-    if ( First.side == Side::Buy ){
-        if ( First.price == Second.price ){
-            if ( First.arrivalTime == Second.arrivalTime ){
-                return First.orderId < Second.orderId;
-            }
+    return true;
+}
 
-            return First.arrivalTime < Second.arrivalTime;
+bool operator ==(const Order &First, const Order &Second){
+    return First.orderId == Second.orderId && First.arrivalSequence == Second.arrivalSequence && 
+        First.price == Second.price && First.quantity == Second.quantity && First.side == Second.side &&
+            First.type == Second.type && First.instrument == Second.instrument;
+}
+
+bool ByIncreasingOrder::operator ()(const Order &First, const Order &Second) const{
+    if ( First.price == Second.price ){
+        if ( First.arrivalSequence == Second.arrivalSequence ){
+            return First.orderId < Second.orderId;
         }
-        
-        return First.price > Second.price;
-    } else{
-        if ( First.price == Second.price ){
-            if ( First.arrivalTime == Second.arrivalTime ){
-                return First.orderId < Second.orderId;
-            }
 
-            return First.arrivalTime < Second.arrivalTime;
-        }
-        
-        return First.price < Second.price;
+        return First.arrivalSequence < Second.arrivalSequence;
     }
+    
+    return First.price < Second.price;
+}
+
+bool ByDecreasingOrder::operator ()(const Order &First, const Order &Second) const{
+    if ( First.price == Second.price ){
+        if ( First.arrivalSequence == Second.arrivalSequence ){
+            return First.orderId < Second.orderId;
+        }
+
+        return First.arrivalSequence < Second.arrivalSequence;
+    }
+    
+    return First.price > Second.price;
 }
 
 void OrderBook::AddOrder(const Order &newOrder){
@@ -44,14 +58,16 @@ void OrderBook::AddOrder(const Order &newOrder){
     auto incoming = newOrder;
 
     if ( incoming.side == Side::Buy ){
-        while ( !sell_list.empty() && incoming.quantity > 0 && (*sell_list.begin()).price <= incoming.price ){
+        while ( !sell_list.empty() && incoming.quantity > 0 && 
+            ((*sell_list.begin()).price <= incoming.price || incoming.type == OrderType::Market ) )
+        {
             auto cur = *sell_list.begin();
 
             sell_list.erase(sell_list.begin());
             active_orders.erase(cur.orderId);
 
             trades.push_back(Trade{
-                .tradeTime = incoming.arrivalTime,
+                .tradeSequence = incoming.arrivalSequence,
                 .buyerId = incoming.orderId,
                 .sellerId = cur.orderId,
                 .instrument = cur.instrument,
@@ -64,10 +80,11 @@ void OrderBook::AddOrder(const Order &newOrder){
             } else{
                 active_orders[cur.orderId] = Order{
                     .orderId = cur.orderId,
-                    .arrivalTime = cur.arrivalTime,
+                    .arrivalSequence = cur.arrivalSequence,
                     .price = cur.price,
                     .quantity = cur.quantity - incoming.quantity,
                     .side = cur.side,
+                    .type = OrderType::Limit,
                     .instrument = cur.instrument
                 };
 
@@ -77,14 +94,16 @@ void OrderBook::AddOrder(const Order &newOrder){
             }
         }
     } else{
-        while ( !buy_list.empty() && incoming.quantity > 0 && (*buy_list.begin()).price >= incoming.price ){
+        while ( !buy_list.empty() && incoming.quantity > 0 
+                && ((*buy_list.begin()).price >= incoming.price || incoming.type == OrderType::Market ) )
+        {
             auto cur = *buy_list.begin();
 
             buy_list.erase(buy_list.begin());
             active_orders.erase(cur.orderId);
 
             trades.push_back(Trade{
-                .tradeTime = incoming.arrivalTime,
+                .tradeSequence = incoming.arrivalSequence,
                 .buyerId = cur.orderId,
                 .sellerId = incoming.orderId,
                 .instrument = cur.instrument,
@@ -97,10 +116,11 @@ void OrderBook::AddOrder(const Order &newOrder){
             } else{
                 active_orders[cur.orderId] = Order{
                     .orderId = cur.orderId,
-                    .arrivalTime = cur.arrivalTime,
+                    .arrivalSequence = cur.arrivalSequence,
                     .price = cur.price,
                     .quantity = cur.quantity - incoming.quantity,
                     .side = cur.side,
+                    .type = OrderType::Limit,
                     .instrument = cur.instrument
                 };
                 
@@ -111,7 +131,7 @@ void OrderBook::AddOrder(const Order &newOrder){
         }
     }
 
-    if ( incoming.quantity ){
+    if ( incoming.quantity && incoming.type != OrderType::Market ){
         if ( incoming.side == Side::Buy ){
             buy_list.insert(incoming);
         } else{
@@ -149,8 +169,8 @@ std:: optional <Order> OrderBook::GetOrder(int Id){
 }
 
 void OrderBook::PrintLog(){
-    for ( auto &[tradeTime, buyerId, sellerId, instrument, price, quantity]: trades ){
-        std::cout << tradeTime << ' '  
+    for ( auto &[tradeSequence, buyerId, sellerId, instrument, price, quantity]: trades ){
+        std::cout << tradeSequence << ' '  
         << buyerId << ' ' 
         << sellerId << ' ' 
         << instrument << ' ' 

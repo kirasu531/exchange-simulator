@@ -14,26 +14,44 @@ enum class Side{
     Sell
 };
 
+enum class OrderType{
+    Limit,
+    Market
+};
+
 struct Order{
     int orderId = -1;
-    int arrivalTime = 0;
+    int arrivalSequence = 0;
     int price = 0;
     int quantity = 0;
     Side side;
-    std::string instrument = "null";
+    OrderType type;
+    std::string instrument;
 
     void print();
 };
 
-bool operator <(const Order &First, const Order &Second);
+bool IsValidOrder(const Order &order);
+
+struct ByIncreasingOrder{
+    bool operator ()(const Order &First, const Order &Second) const;
+};
+
+struct ByDecreasingOrder{
+    bool operator ()(const Order &First, const Order &Second) const;
+};
+
+bool operator ==(const Order &First, const Order &Second);
 
 struct OrderBook{
-    std::set <Order> buy_list, sell_list;
-    std::map <int, Order> all_orders, active_orders;
+    std::set <Order, ByDecreasingOrder> buy_list;
+    std::set <Order, ByIncreasingOrder> sell_list;
+    std::map <int, Order> all_orders;
+    std::map <int, Order> active_orders;
     std::vector <Trade> trades;
 
     void AddOrder(const Order &newOrder);
     void RemoveOrder(int Id);
-    std::optional<Order> GetOrder(int Id);
+    std::optional <Order> GetOrder(int Id);
     void PrintLog();
 };

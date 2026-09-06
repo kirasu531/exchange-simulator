@@ -2,5 +2,6 @@
   "github.copilot.enable": {
     "*": false
   },
-  "github.copilot.nextEditSuggestions.enabled": false
+  "github.copilot.nextEditSuggestions.enabled": false,
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }
