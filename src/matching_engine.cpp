@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <optional>
 
-void MatchingEngine::AddOrder(const Order &newOrder){
-    if ( used_Ids.find(newOrder.orderId) != used_Ids.end() ) return;
+AddOrderResult MatchingEngine::AddOrder(const Order &newOrder){
+    if ( used_Ids.find(newOrder.orderId) != used_Ids.end() ) return AddOrderResult::DuplicateId;
 
-    if ( IsValidOrder(newOrder) == false ) return;
+    if ( !IsValidOrder(newOrder) ) return AddOrderResult::InvalidOrder;
     
     auto incoming = newOrder;
 
@@ -20,13 +20,15 @@ void MatchingEngine::AddOrder(const Order &newOrder){
         groups[incoming.instrument] = OrderBook();
     }
 
-    groups[incoming.instrument].AddOrder(incoming);
+    groups[incoming.instrument].AddOrder(incoming, nextTradeNumber);
+
+    return AddOrderResult::Accepted;
 }
 
-void MatchingEngine::CancelOrder(int Id){
-    if ( type.find(Id) == type.end() ) return;
+CancelResult MatchingEngine::CancelOrder(int Id){
+    if ( type.find(Id) == type.end() ) return CancelResult::NotFound;
 
-    groups[type[Id]].RemoveOrder(Id);
+    return groups[type[Id]].RemoveOrder(Id);
 }
 
 std:: optional<Order> MatchingEngine::GetOrder(int Id){
@@ -35,7 +37,7 @@ std:: optional<Order> MatchingEngine::GetOrder(int Id){
     return groups[type[Id]].GetOrder(Id);
 }
 
-void MatchingEngine::PrintTrades(){
+std::vector <Trade> MatchingEngine::GetTrades(){
     std::vector <Trade> trade_log;
     
     for ( auto &[instrument, OrderBook]: groups ){
@@ -47,6 +49,12 @@ void MatchingEngine::PrintTrades(){
     sort(begin(trade_log), end(trade_log), [&](const Trade &tradeA, const Trade &tradeB){
         return tradeA.tradeSequence < tradeB.tradeSequence;
     });
+    
+    return trade_log;
+}
+
+void MatchingEngine::PrintTrades(){
+    auto trade_log = GetTrades();
 
     for ( auto &trade: trade_log ){
         trade.printTrade();

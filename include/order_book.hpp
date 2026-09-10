@@ -19,6 +19,17 @@ enum class OrderType{
     Market
 };
 
+enum class AddOrderResult{
+    Accepted,
+    DuplicateId,
+    InvalidOrder
+};
+
+enum class CancelResult{
+    Cancelled, 
+    NotFound
+};
+
 struct Order{
     int orderId = -1;
     int arrivalSequence = 0;
@@ -50,8 +61,8 @@ struct OrderBook{
     std::map <int, Order> active_orders;
     std::vector <Trade> trades;
 
-    void AddOrder(const Order &newOrder);
-    void RemoveOrder(int Id);
+    AddOrderResult AddOrder(const Order &newOrder, int &nextTradeNumber);
+    CancelResult RemoveOrder(int Id);
     std::optional <Order> GetOrder(int Id);
     void PrintLog();
 };

@@ -1,0 +1,48 @@
+note about creating tests, earlier you used orderbook and checked its inner functions. But for now, only use matchingengine, orderbook if necessary. 
+
+1. this test should check all possible InvalidOrder verdicts: put obviously invalid orders (price, quantity etc. is invalid) and check the verdict.
+
+2. check Accepted verdict: put at least 2 differnet valid orders and check the status. FIrst, put 2 valid orders with same instrument (diff id), after that put another valid order with diffferent instrument. Obvoiusly, all three should have different ids
+
+3. check DuplidateId verdict: just put two valid orders with same orderid, check the verdict. After that, try to put another order which differs only in instrument from the first put order
+
+4. Check GetOrder: put one valid order, then compare it with getOrder + check it's sequence = 0. put invalid order (or with same id, doesn't matter), then put good valid order. after that check lasts arrival seqeucne = 1 with getOrder
+
+5. check buy/sell invariant (buy.highest < sell.lowest): put one buy and one sell so that buy.price < sell.price with same quantity. Then check by getOrder if one of them still exists.
+
+6. check instruments don't cross: put one buy and one sell with buy.price > sell.price, with same quantity, different instruments. Then check by getOrder if one of them still exists.
+
+7. check partial fill: take orders A and B: A = buy, B = sell, A.price >= B.price, A.quantity < B.quantity; put A first, then B; after that check by getOrder if B exists and in correct quantity.
+
+8. best bid first: take orders A, B, C: A = B = buy, C = sell, C.price >= A.price > B.price, make quantity of everything 1. put B A C (in this order), then check if only B remains by getorder(B.id) = B
+
+9. best ask first: logic should be the same as above, A = B = sell, C = buy, A.price < B.price <= C.price, (A,B,C).quanity = 1, put B A C (in this order), then check if only B remains by getOrder(B.id) = B
+
+10. sell orers maatches several buy orders: take orders A, B, C: A = B = buy, C = sell, A.price > B.price >= C.price,  A.quantity < C.quantity, A.qu + B.qu > C.qu; put B A C in this order (so this way A and C should cancel out, only leaving B). Then check by getorder(B.id).quantity = remaining quantity
+
+#by .q I mean .quantity
+
+11. buy order matches multiple sell orders: take orders A, B, C: A = B = sell, C = buy, A.price < B.price <= C.price, A.q < C.q & A.q + B.q > C.q; put B A C (in this order), then check by getOrder(B.id).q = remaining quantity
+
+12. FIFO for sells at same price (idk what fifo means here): take orders A, B, C: A = B = sell, C = buy, (A, B, C).(price, quantity) = 1; put A B C (in this order), then check if B remains by getOrder(B.id) = B
+
+13. FIFO for buys at same price: take orders A, B, C: A = B = buy, C = sell, (A,B,C).(price.quantity) = 1; put A B C (in this order), then check if B remains by getOrder(B.id) = B
+
+14. Market order shouldn't rest: just put valid market order into empty engine then check getOrder(0) = empty
+
+15. Cancel order: put valid order A, then check cancelorder(A.id) = Cancelled + getOrder(A.id) = empty; then check cancelorder(A.id) = NotFound
+
+16. Cancel fully filled orders: take A, B: A = B, except A = buy, B = sell; put both of them into engine, then try to cancel them
+
+17. Check TradeLog for one instrument: take A, B, C: A = B = buy, C = sell, A.price > B.price >= C.price, C.q >= A.q + B.q; then put A B C (in this order), after that check GetTrades() = correct log (trade sequence starts from 0)
+
+18. Check TradeLog is global: take A, B, C, D: A.instru = B.in, C.in = D.in, A.in != C.in, A = C = buy, B = D = sell, A.price = C.price > B.price = D.price; put A, C, B, D; after that check tradelog (it should contain 2 trades)
+
+19. Market buy consumes available sell orders
+
+20. Market sell consumes available buy orders
+
+21. Market order larger than entire opposite book, doesn't rest
+
+22. Limit order larger than entire opposite book, rests with remainder
+

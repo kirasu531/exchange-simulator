@@ -12,8 +12,7 @@ void Order::print(){
 
 bool IsValidOrder(const Order &order){
     if ( order.orderId < 0 ) return false;
-    if ( order.arrivalSequence < 0 ) return false;
-    if ( order.price <= 0 ) return false;
+    if ( order.type == OrderType::Limit && order.price <= 0 ) return false;
     if ( order.quantity <= 0 ) return false;
     if ( order.instrument.empty() ) return false;
 
@@ -50,8 +49,8 @@ bool ByDecreasingOrder::operator ()(const Order &First, const Order &Second) con
     return First.price > Second.price;
 }
 
-void OrderBook::AddOrder(const Order &newOrder){
-    if ( all_orders.find(newOrder.orderId) != all_orders.end() ) return;
+AddOrderResult OrderBook::AddOrder(const Order &newOrder, int &nextTradeNumber){
+    if ( all_orders.find(newOrder.orderId) != all_orders.end() ) return AddOrderResult::DuplicateId;
 
     all_orders[newOrder.orderId] = newOrder;
 
@@ -67,7 +66,7 @@ void OrderBook::AddOrder(const Order &newOrder){
             active_orders.erase(cur.orderId);
 
             trades.push_back(Trade{
-                .tradeSequence = incoming.arrivalSequence,
+                .tradeSequence = nextTradeNumber++,
                 .buyerId = incoming.orderId,
                 .sellerId = cur.orderId,
                 .instrument = cur.instrument,
@@ -103,7 +102,7 @@ void OrderBook::AddOrder(const Order &newOrder){
             active_orders.erase(cur.orderId);
 
             trades.push_back(Trade{
-                .tradeSequence = incoming.arrivalSequence,
+                .tradeSequence = nextTradeNumber++,
                 .buyerId = cur.orderId,
                 .sellerId = incoming.orderId,
                 .instrument = cur.instrument,
@@ -140,9 +139,11 @@ void OrderBook::AddOrder(const Order &newOrder){
 
         active_orders[incoming.orderId] = incoming;
     }
+
+    return AddOrderResult::Accepted;
 }
 
-void OrderBook::RemoveOrder(int Id){
+CancelResult OrderBook::RemoveOrder(int Id){
     auto iter = active_orders.find(Id);
     
     if ( iter != active_orders.end() ){
@@ -155,6 +156,10 @@ void OrderBook::RemoveOrder(int Id){
         }
 
         active_orders.erase(iter);
+
+        return CancelResult::Cancelled;
+    } else{
+        return CancelResult::NotFound;
     }
 }
 
