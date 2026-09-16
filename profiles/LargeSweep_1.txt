@@ -1,0 +1,9 @@
+Workload: LargeSweep
+
+|   % Time | Self (s) |        Calls | Function                                                     |
+|----------|----------|--------------|--------------------------------------------------------------|
+|   33.72% |     0.29 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
+|   23.26% |     0.20 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
+|   11.63% |     0.10 |      500,000 | std::set<int> insertion                                      |
+|    9.30% |     0.08 |    3,999,973 | std::map<std::string, OrderBook> lookup/insertion            |
+|    9.30% |     0.08 |      499,995 | std::set<Order> insertion                                    |

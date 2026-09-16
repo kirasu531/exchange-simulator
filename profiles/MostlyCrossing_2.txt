@@ -1,0 +1,12 @@
+Workload: MostlyCrossing
+
+|   % Time | Self (s) |        Calls | Function                                                     |
+|----------|----------|--------------|--------------------------------------------------------------|
+|   25.00% |     0.07 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
+|   21.43% |     0.06 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
+|    7.14% |     0.02 |      500,000 | std::set<int> insertion                                      |
+|    3.57% |     0.01 |    4,248,297 | std::map<std::string, OrderBook> lookup/insertion            |
+|    3.57% |     0.01 |      368,762 | std::set<Order> insertion                                    |
+|    3.57% |     0.01 |      131,233 | std::set<Order> insertion                                    |
+|    0.00% |     0.00 |    1,250,313 | std::string assignment                                       |
+|    0.00% |     0.00 |      500,000 | IsValidOrder(Order const&)                                   |

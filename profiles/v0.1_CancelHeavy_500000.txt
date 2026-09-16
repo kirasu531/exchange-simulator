@@ -1,0 +1,9 @@
+Workload: CancelHeavy
+
+|   % Time | Self (s) |        Calls | Function                                                     |
+|----------|----------|--------------|--------------------------------------------------------------|
+|   18.57% |     0.26 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
+|   17.86% |     0.25 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
+|   17.86% |     0.25 |      500,000 | std::set<Order> insertion                                    |
+|   16.43% |     0.23 |      500,000 | std::set<Order> lookup/erase                                 |
+|   13.57% |     0.19 |      500,000 | MatchingEngine::CancelOrder(int)                             |
