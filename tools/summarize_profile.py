@@ -97,7 +97,7 @@ def parse_profile():
 
         friendly = friendly_name(function)
 
-        if friendly is "None":
+        if friendly == "None":
             continue
 
         entries.append(
