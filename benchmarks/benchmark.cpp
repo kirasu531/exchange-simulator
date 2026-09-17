@@ -306,12 +306,14 @@ double RunLargeSweep(int runs){
 }
 
 int main(int argc, char* argv[]){
-    if ( argc == 3 ){
+    if ( argc >= 3 ){
         std::string type;
 
         type = argv[1];
         operationCount = std::stoi(argv[2]);
         int runs = 1;
+
+        if ( argc > 3 ) runs = std::stoi(argv[3]);
 
         orders.resize(operationCount);
 
@@ -362,6 +364,16 @@ int main(int argc, char* argv[]){
                 .type = "LargeSweep",
                 .operations = 5,
                 .medianTime = RunLargeSweep(runs),
+                .totalRuns = runs,
+                .trades = totalTrades
+            });
+        }
+
+        if ( type == "ManyInstruments" ){
+            tests.push_back(Test{
+                .type = "ManyInstruments",
+                .operations = operationCount,
+                .medianTime = RunManyInstruments(runs),
                 .totalRuns = runs,
                 .trades = totalTrades
             });

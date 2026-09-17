@@ -2,11 +2,8 @@ Workload: LargeSweep
 
 |   % Time | Self (s) |        Calls | Function                                                     |
 |----------|----------|--------------|--------------------------------------------------------------|
-|   31.76% |     0.27 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
-|   21.18% |     0.18 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
-|   16.47% |     0.14 |      499,995 | std::set<Order> insertion                                    |
-|   12.94% |     0.11 |      500,000 | std::set<int> insertion                                      |
-|    7.06% |     0.06 |    3,999,973 | std::map<std::string, OrderBook> lookup/insertion            |
-|    0.00% |     0.00 |    1,499,996 | std::string assignment                                       |
-|    0.00% |     0.00 |      500,000 | IsValidOrder(Order const&)                                   |
-|    0.00% |     0.00 |            1 | PrintTests(std::vector<Test, std::allocator<Test> > const&)  |
+|   33.72% |     0.29 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
+|   23.26% |     0.20 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
+|   11.63% |     0.10 |      500,000 | std::set<int> insertion                                      |
+|    9.30% |     0.08 |    3,999,973 | std::map<std::string, OrderBook> lookup/insertion            |
+|    9.30% |     0.08 |      499,995 | std::set<Order> insertion                                    |

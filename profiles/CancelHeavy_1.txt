@@ -2,8 +2,8 @@ Workload: CancelHeavy
 
 |   % Time | Self (s) |        Calls | Function                                                     |
 |----------|----------|--------------|--------------------------------------------------------------|
-|   18.57% |     0.26 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
-|   17.86% |     0.25 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
-|   17.86% |     0.25 |      500,000 | std::set<Order> insertion                                    |
-|   16.43% |     0.23 |      500,000 | std::set<Order> lookup/erase                                 |
-|   13.57% |     0.19 |      500,000 | MatchingEngine::CancelOrder(int)                             |
+|   61.82% |     0.34 |      500,000 | OrderBook::AddOrder(Order const&, int&)                      |
+|    7.27% |     0.04 |           16 | std::unordered_map<int, Order> rehash                        |
+|    5.45% |     0.03 |      500,000 | OrderBook::RemoveOrder(int)                                  |
+|    3.64% |     0.02 |    1,000,000 | std::unordered_map<int, std::string> lookup/operator[]       |
+|    3.64% |     0.02 |           16 | std::unordered_map<int, std::string> rehash                  |

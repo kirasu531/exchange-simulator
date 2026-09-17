@@ -25,15 +25,22 @@ add_library(exchange_core
 )
 
 add_executable(exchange
-    src/main.cpp
+    	src/main.cpp
 )
 
 add_executable(exchange_tests
 	tests/order_book_tests.cpp
 )
 
+add_executable(exchange_bench
+	benchmarks/benchmark.cpp
+)
+
+
+
 target_include_directories(exchange_core PUBLIC include)
 
+target_link_libraries(exchange_bench PRIVATE exchange_core)
 target_link_libraries(exchange PRIVATE exchange_core)
 target_link_libraries(exchange_tests PRIVATE 
 	exchange_core

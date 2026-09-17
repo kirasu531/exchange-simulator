@@ -8,6 +8,9 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <queue>
+#include <unordered_set>
+#include <unordered_map>
 
 enum class Side{
     Buy,
@@ -55,14 +58,17 @@ struct ByDecreasingOrder{
 bool operator ==(const Order &First, const Order &Second);
 
 struct OrderBook{
-    std::set <Order, ByDecreasingOrder> buy_list;
-    std::set <Order, ByIncreasingOrder> sell_list;
-    std::map <int, Order> all_orders;
-    std::map <int, Order> active_orders;
-    std::vector <Trade> trades;
+    private:
+        std::map <int, std::queue <Order>> buy_list;
+        std::map <int, std::queue <Order>> sell_list;
+        std::unordered_map <int, Order> active_orders;
+        std::unordered_set <int> canceled_orders;
+        std::vector <Trade> trades;
 
-    AddOrderResult AddOrder(const Order &newOrder, int &nextTradeNumber);
-    CancelResult RemoveOrder(int Id);
-    std::optional <Order> GetOrder(int Id);
-    void PrintLog();
+    public:
+        AddOrderResult AddOrder(const Order &newOrder, int &nextTradeNumber);
+        CancelResult RemoveOrder(int Id);
+        std::optional <Order> GetOrder(int Id);
+        std::vector <Trade> GetTrades();
+        void PrintLog();
 };

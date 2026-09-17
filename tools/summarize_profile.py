@@ -23,6 +23,27 @@ def friendly_name(function):
     if "std::vector<Order" in function and "_M_default_append" in function:
         return "None"
 
+    if "_Hashtable<std::__cxx11::basic_string" in function and "OrderBook" in function and "_M_rehash" in function:
+        return "std::unordered_map<std::string, OrderBook> rehash"
+
+    if "_Hashtable<int, int" in function and "_M_rehash" in function:
+        return "std::unordered_set<int> rehash"
+
+    if "_Map_base<std::__cxx11::basic_string" in function and "OrderBook" in function and "operator[]" in function:
+        return "std::unordered_map<std::string, OrderBook> lookup/operator[]"
+
+    if "_Hashtable<int, std::pair<int const, std::__cxx11::basic_string" in function and "_M_rehash" in function:
+        return "std::unordered_map<int, std::string> rehash"
+
+    if "_Hashtable<int, std::pair<int const, Order>" in function and "_M_rehash" in function:
+        return "std::unordered_map<int, Order> rehash"
+
+    if "_Map_base<int" in function and "basic_string" in function and "operator[]" in function:
+        return "std::unordered_map<int, std::string> lookup/operator[]"
+
+    if "_Rb_tree<int" in function and "queue<Order" in function and "_M_get_insert_hint_unique_pos" in function:
+        return "Price-level map insertion"
+
     return function
 
 
@@ -74,12 +95,17 @@ def parse_profile():
         if should_ignore(function) or function == "":
             continue
 
+        friendly = friendly_name(function)
+
+        if friendly is "None":
+            continue
+
         entries.append(
             (
                 percentage,
                 self_time,
                 calls,
-                friendly_name(function)
+                friendly
             )
         )
 

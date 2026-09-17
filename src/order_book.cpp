@@ -50,91 +50,95 @@ bool ByDecreasingOrder::operator ()(const Order &First, const Order &Second) con
 }
 
 AddOrderResult OrderBook::AddOrder(const Order &newOrder, int &nextTradeNumber){
-    if ( all_orders.find(newOrder.orderId) != all_orders.end() ) return AddOrderResult::DuplicateId;
-
-    all_orders[newOrder.orderId] = newOrder;
-
     auto incoming = newOrder;
 
     if ( incoming.side == Side::Buy ){
         while ( !sell_list.empty() && incoming.quantity > 0 && 
-            ((*sell_list.begin()).price <= incoming.price || incoming.type == OrderType::Market ) )
+            (sell_list.begin() -> first <= incoming.price || incoming.type == OrderType::Market ) )
         {
-            auto cur = *sell_list.begin();
+            auto &Queue = sell_list.begin() -> second;
 
-            sell_list.erase(sell_list.begin());
-            active_orders.erase(cur.orderId);
+            while ( !Queue.empty() && incoming.quantity > 0 ){
+                auto &cur = Queue.front();
 
-            trades.push_back(Trade{
-                .tradeSequence = nextTradeNumber++,
-                .buyerId = incoming.orderId,
-                .sellerId = cur.orderId,
-                .instrument = cur.instrument,
-                .price = cur.price,
-                .quantity = std::min(incoming.quantity, cur.quantity)
-            }); 
+                if ( canceled_orders.find(cur.orderId) != canceled_orders.end() ){
+                    Queue.pop();
 
-            if ( incoming.quantity >= cur.quantity ){
-                incoming.quantity -= cur.quantity;
-            } else{
-                active_orders[cur.orderId] = Order{
-                    .orderId = cur.orderId,
-                    .arrivalSequence = cur.arrivalSequence,
+                    continue;
+                }
+
+                trades.push_back(Trade{
+                    .tradeSequence = nextTradeNumber++,
+                    .buyerId = incoming.orderId,
+                    .sellerId = cur.orderId,
+                    .instrument = cur.instrument,
                     .price = cur.price,
-                    .quantity = cur.quantity - incoming.quantity,
-                    .side = cur.side,
-                    .type = OrderType::Limit,
-                    .instrument = cur.instrument
-                };
+                    .quantity = std::min(incoming.quantity, cur.quantity)
+                }); 
 
-                sell_list.insert(active_orders[cur.orderId]);
+                if ( incoming.quantity >= cur.quantity ){
+                    active_orders.erase(cur.orderId);
+                    incoming.quantity -= cur.quantity;
 
-                incoming.quantity = 0;
+                    Queue.pop();
+                } else{
+                    active_orders[cur.orderId].quantity -= incoming.quantity;
+                    cur.quantity -= incoming.quantity;
+                    incoming.quantity = 0;
+                }
+            }
+
+            if ( Queue.empty() ){
+                sell_list.erase(sell_list.begin());
             }
         }
     } else{
         while ( !buy_list.empty() && incoming.quantity > 0 
-                && ((*buy_list.begin()).price >= incoming.price || incoming.type == OrderType::Market ) )
+                && (buy_list.rbegin() -> first >= incoming.price || incoming.type == OrderType::Market ) )
         {
-            auto cur = *buy_list.begin();
+            auto &Queue = buy_list.rbegin() -> second;
 
-            buy_list.erase(buy_list.begin());
-            active_orders.erase(cur.orderId);
+            while ( !Queue.empty() && incoming.quantity > 0 ){
+                auto &cur = Queue.front();
 
-            trades.push_back(Trade{
-                .tradeSequence = nextTradeNumber++,
-                .buyerId = cur.orderId,
-                .sellerId = incoming.orderId,
-                .instrument = cur.instrument,
-                .price = cur.price,
-                .quantity = std::min(incoming.quantity, cur.quantity)
-            }); 
+                if ( canceled_orders.find(cur.orderId) != canceled_orders.end() ){
+                    Queue.pop();
 
-            if ( incoming.quantity >= cur.quantity ){
-                incoming.quantity -= cur.quantity;
-            } else{
-                active_orders[cur.orderId] = Order{
-                    .orderId = cur.orderId,
-                    .arrivalSequence = cur.arrivalSequence,
+                    continue;
+                }
+
+                trades.push_back(Trade{
+                    .tradeSequence = nextTradeNumber++,
+                    .buyerId = cur.orderId,
+                    .sellerId = incoming.orderId,
+                    .instrument = cur.instrument,
                     .price = cur.price,
-                    .quantity = cur.quantity - incoming.quantity,
-                    .side = cur.side,
-                    .type = OrderType::Limit,
-                    .instrument = cur.instrument
-                };
-                
-                buy_list.insert(active_orders[cur.orderId]);
+                    .quantity = std::min(incoming.quantity, cur.quantity)
+                }); 
 
-                incoming.quantity = 0;
+                if ( incoming.quantity >= cur.quantity ){
+                    active_orders.erase(cur.orderId);
+                    incoming.quantity -= cur.quantity;
+
+                    Queue.pop();
+                } else{
+                    active_orders[cur.orderId].quantity -= incoming.quantity;
+                    cur.quantity -= incoming.quantity;
+                    incoming.quantity = 0;
+                }
+            }
+
+            if ( Queue.empty() ){
+                buy_list.erase(--buy_list.end());
             }
         }
     }
 
     if ( incoming.quantity && incoming.type != OrderType::Market ){
         if ( incoming.side == Side::Buy ){
-            buy_list.insert(incoming);
+            buy_list[incoming.price].push(incoming);
         } else{
-            sell_list.insert(incoming); 
+            sell_list[incoming.price].push(incoming);
         }
 
         active_orders[incoming.orderId] = incoming;
@@ -147,13 +151,7 @@ CancelResult OrderBook::RemoveOrder(int Id){
     auto iter = active_orders.find(Id);
     
     if ( iter != active_orders.end() ){
-        auto cur = iter -> second;
-
-        if ( cur.side == Side::Buy ){
-            buy_list.erase(cur);
-        } else{
-            sell_list.erase(cur);
-        }
+        canceled_orders.insert(Id);
 
         active_orders.erase(iter);
 
@@ -172,6 +170,8 @@ std:: optional <Order> OrderBook::GetOrder(int Id){
         
     return std::nullopt;
 }
+
+std::vector <Trade> OrderBook::GetTrades(){ return trades; } 
 
 void OrderBook::PrintLog(){
     for ( auto &[tradeSequence, buyerId, sellerId, instrument, price, quantity]: trades ){

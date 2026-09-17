@@ -1,1 +1,25 @@
+# CMake build directories
 build/
+build-release/
+build-profile/
+build-asan/
+build-ubsan/
+build-sanitize/
+
+# Profiling output
+gmon.out
+
+# Temporary / scratch files
+cur_out
+in
+sample_out
+test_creating.txt
+tmp.txt
+index.html
+workflow
+input2
+output2
+
+# Accidental local binaries
+src/main
+src/order_book

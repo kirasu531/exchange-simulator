@@ -1,0 +1,8 @@
+Workload: ManyInstruments
+
+|   % Time | Self (s) |        Calls | Function                                                     |
+|----------|----------|--------------|--------------------------------------------------------------|
+|   20.31% |     0.13 |      500,000 | MatchingEngine::AddOrder(Order const&)                       |
+|   12.50% |     0.08 |           16 | std::unordered_map<int, std::string> rehash                  |
+|    3.12% |     0.02 |      500,000 | std::unordered_map<int, Order> rehash                        |
+|    1.56% |     0.01 |    1,500,000 | std::map<std::string, OrderBook> lookup/insertion            |

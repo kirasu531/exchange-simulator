@@ -5,7 +5,7 @@
 #include <optional>
 
 AddOrderResult MatchingEngine::AddOrder(const Order &newOrder){
-    if ( used_Ids.find(newOrder.orderId) != used_Ids.end() ) return AddOrderResult::DuplicateId;
+    if ( type.find(newOrder.orderId) != type.end() ) return AddOrderResult::DuplicateId;
 
     if ( !IsValidOrder(newOrder) ) return AddOrderResult::InvalidOrder;
     
@@ -14,11 +14,6 @@ AddOrderResult MatchingEngine::AddOrder(const Order &newOrder){
     incoming.arrivalSequence = nextSequence++;
     
     type[incoming.orderId] = incoming.instrument;
-    used_Ids.insert(incoming.orderId);
-
-    if ( groups.find(incoming.instrument) == groups.end() ){
-        groups[incoming.instrument] = OrderBook();
-    }
 
     groups[incoming.instrument].AddOrder(incoming, nextTradeNumber);
 
@@ -41,7 +36,7 @@ std::vector <Trade> MatchingEngine::GetTrades(){
     std::vector <Trade> trade_log;
     
     for ( auto &[instrument, OrderBook]: groups ){
-        for ( auto &trades: OrderBook.trades ){
+        for ( auto trades: OrderBook.GetTrades() ){
             trade_log.push_back(trades);
         }
     }

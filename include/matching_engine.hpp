@@ -6,17 +6,20 @@
 #include <set>
 #include <optional>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 struct MatchingEngine{
-    std::map <std::string, OrderBook> groups;
-    std::map <int, std::string> type;
-    std::set <int> used_Ids;
-    int nextSequence = 0;
-    int nextTradeNumber = 0;
+    private:
+        std::map <std::string, OrderBook> groups;
+        std::unordered_map <int, std::string> type;
+        int nextSequence = 0;
+        int nextTradeNumber = 0;
 
-    AddOrderResult AddOrder(const Order &newOrder);
-    CancelResult CancelOrder(int Id);
-    std:: optional <Order> GetOrder(int Id);
-    std:: vector <Trade> GetTrades();
-    void PrintTrades();
+    public:
+        AddOrderResult AddOrder(const Order &newOrder);
+        CancelResult CancelOrder(int Id);
+        std:: optional <Order> GetOrder(int Id);
+        std:: vector <Trade> GetTrades();
+        void PrintTrades();
 };
