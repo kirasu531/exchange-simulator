@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 if [ "$#" -ne 2 ] && [ "$#" -ne 3 ]; then
 	echo "Usage: ./profile <workload> <operationCount> [checkpoint]"
