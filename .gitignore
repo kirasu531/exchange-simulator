@@ -5,20 +5,18 @@ build-profile/
 build-asan/
 build-ubsan/
 build-sanitize/
+build-tsan/
+
+# Random directory
+Testing/
 
 # Profiling output
 gmon.out
 
 # Temporary / scratch files
-cur_out
-in
-sample_out
 test_creating.txt
-tmp.txt
 index.html
 workflow
-input2
-output2
 
 # Accidental local binaries
 src/main
