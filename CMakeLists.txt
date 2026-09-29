@@ -79,3 +79,16 @@ set_tests_properties(
     PROPERTIES TIMEOUT 5
 )
 
+add_test(
+    NAME recovery_integration
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tests/network_integration.py
+        $<TARGET_FILE:exchange_server>
+)
+
+set_tests_properties(
+    recovery_integration
+    PROPERTIES TIMEOUT 2
+)
+

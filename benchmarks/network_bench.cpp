@@ -1,3 +1,6 @@
+#include "network_bench.hpp"
+#include "matching_engine.hpp"
+
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
@@ -9,9 +12,6 @@
 #include <cassert>
 #include <vector>
 #include <string>
-
-
-#include "network_bench.hpp"
 
 std::mt19937 rng(1337);
 

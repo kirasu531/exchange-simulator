@@ -57,8 +57,8 @@ def run_test(test_function):
 
     server = subprocess.Popen(
         [server_path, str(port)],
-        # stdout=subprocess.DEVNULL,
-        # stderr=subprocess.STDOUT
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT
     )
 
     try:

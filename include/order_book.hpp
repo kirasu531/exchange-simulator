@@ -1,4 +1,5 @@
 #pragma once
+
 #include "trade.hpp"
 
 #include <iostream>

@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <iostream>
+#include <cassert>
 
 bool SendAll(int fd, const void *data, size_t size){
     auto bytes = static_cast <const char*> (data);
@@ -46,22 +47,66 @@ int RecvAll(int fd, void *data, size_t size){
     return received;
 }
 
-bool SendUint32(int fd, uint32_t value){
-    value = htonl(value);
+bool RecvLine(int fd, std::string &pending, std::string &line, void *data, size_t size){
+    line.clear();
 
-    return SendAll(fd, &value, sizeof(value));
-}
+    {
+        bool found = false;
+        int idx = -1;
 
-bool RecvUint32(int fd, uint32_t &value){
-    uint32_t network_value;
+        for ( int i = 0; size_t(i) < pending.size(); i++ ){
+            if ( pending[i] == '\n' ){
+                found = true;
+                idx = i;
+                
+                break;
+            }
+        }
 
-    if ( !RecvAll(fd, &network_value, sizeof(network_value)) ){
-        return false;
+        if ( found ){
+            std::string next;
+
+            for ( int i = 0; size_t(i) < pending.size(); i++ ){
+                if ( i < idx ) line.push_back(pending[i]);
+                if ( i > idx ) next.push_back(pending[i]);
+            }
+
+            std::swap(pending, next);
+
+            return true;
+        }
+    }
+    
+    auto bytes = static_cast <char*> (data);
+
+    int total_received = 0;
+
+    while ( true ){
+        ssize_t bytes_received = recv(fd, bytes, size, 0);
+
+        if ( bytes_received <= 0 ) return false;
+
+        total_received += bytes_received;
+
+        for ( int i = 0; i < bytes_received; i++ ){
+            if ( *(bytes + i) == '\n' ){
+                line += pending;
+                pending.clear();
+
+                for ( int j = i + 1; j < bytes_received; j++ ){
+                    pending.push_back(*(bytes + j));
+                }
+
+                return true;
+            }
+
+            pending.push_back(*(bytes + i));
+        }
+
+        if ( total_received > 1000 ) return false;
     }
 
-    value = ntohl(network_value);
-
-    return true;
+    assert(false);
 }
 
 int main(int argc, char *argv[]){
@@ -101,23 +146,19 @@ int main(int argc, char *argv[]){
 
     std::cout << "Connection successful\n";
 
-    while ( true ){
-        uint32_t receive_value;
+    std::string pending, line;
+    char data[100];
 
-        if ( !RecvUint32(client_fd, receive_value) ){
-            std::cout << "Server closed\n";
-            
-            break;
-        }
+    std::string command;
 
-        std::cout << "Value received: " << receive_value << '\n';
+    while (std::getline(std::cin, command)){
+        command += '\n';
 
-        std::cout << "Enter a value to send: ";
+        assert(SendAll(client_fd, command.data(), command.size()));
 
-        uint32_t value;
-        std::cin >> value;
+        assert(RecvLine(client_fd, pending, line, data, sizeof(data)));
 
-        SendUint32(client_fd, value);
+        std::cout << line << '\n';
     }
 
     close(client_fd);

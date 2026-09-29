@@ -1,3 +1,6 @@
+#include "matching_engine.hpp"
+#include "benchmark.hpp"
+
 #include <iostream>
 #include <vector>
 #include <chrono>
@@ -5,9 +8,6 @@
 #include <random>
 #include <algorithm>
 #include <iomanip>
-
-#include "matching_engine.hpp"
-#include "benchmark.hpp"
 
 std::mt19937 rng(1337);
 

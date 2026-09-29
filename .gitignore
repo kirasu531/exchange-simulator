@@ -17,6 +17,7 @@ gmon.out
 test_creating.txt
 index.html
 workflow
+exchange.log
 
 # Accidental local binaries
 src/main

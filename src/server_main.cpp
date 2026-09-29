@@ -11,14 +11,17 @@
 #include <thread>
 #include <functional>
 #include <mutex>
+#include <fstream>
+#include <sstream>
+
+std::string logPath;
+bool persistenceEnabled;
 
 std::vector <std::string> divide(const std::string &s){
     std::vector <std::string> str;
 
     for ( int i = 0; i < s.size(); i++ ){
-        if ( s[i] == ' ' ){
-            continue;
-        }
+        if ( s[i] == ' ' ) continue;
 
         str.push_back("");
 
@@ -38,39 +41,37 @@ std::vector <std::string> divide(const std::string &s){
 bool isInteger(const std::string &s){
     if ( s.empty() ) return false;
 
-    if ( s.size() == 1 ){
-        return '0' <= s[0] && s[0] <= '9';
-    }
+    if ( s.size() == 1 ) return '0' <= s[0] && s[0] <= '9';
 
     if ( (s[0] < '0' || s[0] > '9') && s[0] != '-' ){
         return false;
     }
 
     for ( int i = 1; i < s.size(); i++ ){
-        if ( s[i] < '0' || s[i] > '9' ){
-            return false;
-        } 
+        if ( s[i] < '0' || s[i] > '9' ) return false;
     }
 
     return true;
 }
 
 bool ParseInt(const std::string &s, int &value){
-    if ( !isInteger(s) ) return false;
-
-    if ( s.size() > size_t(9) ) return false;
+    if ( !isInteger(s) || s.size() > size_t(9) ) return false;
 
     value = stoi(s);
-
     return true;
 }
 
-std::string HandleCommand(MatchingEngine &engine, const std::string &msg){
-    auto vec = divide(msg);
+void LogAppend(const std::string &filename, const std::string &line){
+    if ( !persistenceEnabled ) return;
 
-    if ( vec.empty() ){
-        return "Empty Query";
-    }
+    std::ofstream file(filename, std::ios::app);
+    file << line << '\n';
+}
+
+std::string HandleCommand(MatchingEngine &engine, const std::string &msg){
+    std::vector <std::string> vec = divide(msg);
+
+    if ( vec.empty() ) return "Empty Query";
 
     if ( vec[0] == "ADD" ){
         Order order;
@@ -91,7 +92,11 @@ std::string HandleCommand(MatchingEngine &engine, const std::string &msg){
 
         auto verdict = engine.AddOrder(order);
 
-        if ( verdict == AddOrderResult::Accepted ) return "Accepted";
+        if ( verdict == AddOrderResult::Accepted ){
+            LogAppend(logPath, msg);
+
+            return "Accepted";
+        }
         if ( verdict == AddOrderResult::DuplicateId ) return "Duplicate Id";
 
         return "Invalid Order";
@@ -106,7 +111,11 @@ std::string HandleCommand(MatchingEngine &engine, const std::string &msg){
         
         CancelResult verdict = engine.CancelOrder(orderId);
 
-        if ( verdict == CancelResult::Cancelled ) return "Cancelled";
+        if ( verdict == CancelResult::Cancelled ){
+            LogAppend(logPath, msg);
+
+            return "Cancelled";
+        }
         
         return "Not Found";
     }
@@ -260,6 +269,8 @@ void HandleClient(int client_fd, MatchingEngine &engine, std::mutex &engine_mute
 
         std::string verdict;
 
+        std::cout << "Line received: " << line << '\n';
+
         {
             std::lock_guard <std::mutex> lock(engine_mutex);
             verdict = HandleCommand(engine, line);
@@ -277,14 +288,56 @@ void HandleClient(int client_fd, MatchingEngine &engine, std::mutex &engine_mute
     close(client_fd);
 }
 
+void RestoreLog(const std::string &filename, MatchingEngine &engine){
+    if ( !persistenceEnabled ) return; 
+
+    std::ifstream file(filename);
+
+    std::string line;
+
+    while ( std::getline(file, line) ){
+        std::istringstream input(line);
+        
+        std::string type;
+        input >> type;
+
+        if ( type == "ADD" ){
+            Order order;
+            std::string side, type;
+
+            input 
+            >> order.orderId 
+            >> order.price 
+            >> order.quantity 
+            >> side 
+            >> type
+            >> order.instrument;
+
+            order.side = side == "BUY" ? Side::Buy : Side::Sell;
+            order.type = type == "LIMIT" ? OrderType::Limit : OrderType::Market;
+            
+            engine.AddOrder(order);
+        } else if ( type == "CANCEL" ){
+            int orderId; 
+            input >> orderId;
+
+            engine.CancelOrder(orderId);
+        }
+    }
+}
+
 int main(int argc, char *argv[]){
     int server_port;
 
     if ( argc < 2 || !ParseInt(argv[1], server_port)  ){
-        std::cout << "No port provided, [4000] chosen\n";
-
-        server_port = 4000;
+        server_port = 4000; // default port
     }
+
+    if ( argc >= 4 && std::string(argv[2]) == "--log" ){
+        logPath = argv[3];
+    }
+
+    persistenceEnabled = !logPath.empty();
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -329,6 +382,10 @@ int main(int argc, char *argv[]){
 
     MatchingEngine engine;
     std::mutex engine_mutex;
+
+    RestoreLog(logPath, engine);
+
+    std::cout << "Restore successfull\n";
 
     while ( true ){
         std::cout << "Waiting for client...\n";
