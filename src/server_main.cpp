@@ -269,8 +269,6 @@ void HandleClient(int client_fd, MatchingEngine &engine, std::mutex &engine_mute
 
         std::string verdict;
 
-        std::cout << "Line received: " << line << '\n';
-
         {
             std::lock_guard <std::mutex> lock(engine_mutex);
             verdict = HandleCommand(engine, line);
@@ -324,6 +322,8 @@ void RestoreLog(const std::string &filename, MatchingEngine &engine){
             engine.CancelOrder(orderId);
         }
     }
+
+    std::cout << "Restore successfull\n";
 }
 
 int main(int argc, char *argv[]){
@@ -384,8 +384,6 @@ int main(int argc, char *argv[]){
     std::mutex engine_mutex;
 
     RestoreLog(logPath, engine);
-
-    std::cout << "Restore successfull\n";
 
     while ( true ){
         std::cout << "Waiting for client...\n";
