@@ -25,33 +25,37 @@ add_library(exchange_core
 	src/order_book.cpp
 	src/matching_engine.cpp
 )
-
-add_executable(exchange
-    	src/main.cpp
+add_library(network_utils
+    src/network_utils.cpp
 )
 
+add_executable(exchange
+    src/main.cpp
+)
 add_executable(exchange_tests
 	tests/order_book_tests.cpp
 )
-
 add_executable(exchange_bench
 	benchmarks/benchmark.cpp
 )
-
 add_executable(exchange_server
 	src/server_main.cpp
 )
-
 add_executable(exchange_client
 	src/client_main.cpp
 )
-
 add_executable(exchange_network
 	benchmarks/network_bench.cpp
 )
-
+add_executable(exchange_durability
+	benchmarks/durability_benchmark.cpp
+)
+add_executable(logsync_bench
+    benchmarks/log_sync_benchmark.cpp    
+)
 
 target_include_directories(exchange_core PUBLIC include)
+target_include_directories(network_utils PUBLIC include)
 
 target_link_libraries(exchange_bench PRIVATE exchange_core)
 target_link_libraries(exchange PRIVATE exchange_core)
@@ -59,8 +63,11 @@ target_link_libraries(exchange_tests PRIVATE
 	exchange_core
 	Catch2::Catch2WithMain
 )
-target_link_libraries(exchange_server PRIVATE exchange_core)
-target_link_libraries(exchange_network PRIVATE exchange_core)
+target_link_libraries(exchange_server PRIVATE exchange_core network_utils)
+target_link_libraries(exchange_client PRIVATE network_utils)
+target_link_libraries(exchange_network PRIVATE exchange_core network_utils)
+target_link_libraries(exchange_durability PRIVATE exchange_core network_utils)
+target_link_libraries(logsync_bench PRIVATE network_utils)
 
 catch_discover_tests(exchange_tests)
 
@@ -83,7 +90,7 @@ add_test(
     NAME recovery_integration
     COMMAND
         ${Python3_EXECUTABLE}
-        ${CMAKE_SOURCE_DIR}/tests/network_integration.py
+        ${CMAKE_SOURCE_DIR}/tests/recovery_integration.py
         $<TARGET_FILE:exchange_server>
 )
 

@@ -1,4 +1,5 @@
 #include "matching_engine.hpp"
+#include "network_utils.hpp"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -13,9 +14,28 @@
 #include <mutex>
 #include <fstream>
 #include <sstream>
+#include <fcntl.h>
+#include <charconv>
+#include <atomic>
 
-std::string logPath;
-bool persistenceEnabled;
+enum class CommandType{
+    Add,
+    Cancel,
+    Get,
+    Trades,
+    Invalid
+};
+
+constexpr size_t MAX_LINE_SIZE = 256;
+
+std::string log_path;
+bool persistence_enabled, log_dirty = false;
+
+int log_fd;
+
+std::mutex log_mutex;
+
+std::atomic <bool> keep_syncing;
 
 std::vector <std::string> divide(const std::string &s){
     std::vector <std::string> str;
@@ -38,222 +58,155 @@ std::vector <std::string> divide(const std::string &s){
     return str;
 }
 
-bool isInteger(const std::string &s){
+bool ParseInt(const std::string& s, int& value) {
     if ( s.empty() ) return false;
 
-    if ( s.size() == 1 ) return '0' <= s[0] && s[0] <= '9';
+    auto [ptr, ec] = std::from_chars(
+        s.data(),
+        s.data() + s.size(),
+        value
+    );
 
-    if ( (s[0] < '0' || s[0] > '9') && s[0] != '-' ){
+    return ec == std::errc{} && ptr == s.data() + s.size();
+}
+
+bool AppendLogRecord(int fd, const std::string &line){
+    if ( !persistence_enabled ) return true;
+
+    std::string record = line + '\n';
+
+    if ( WriteAll(fd, record.data(), record.size()) == IOResult::Error ){
+        perror("write log");
         return false;
     }
 
-    for ( int i = 1; i < s.size(); i++ ){
-        if ( s[i] < '0' || s[i] > '9' ) return false;
+    log_dirty = true;
+    return true;
+}
+
+void RunLogSyncLoop(int fd, int T){
+    auto next_sync_time = std::chrono::steady_clock().now();
+
+    while ( keep_syncing ){
+        next_sync_time += std::chrono::milliseconds(T);
+        std::this_thread::sleep_until(next_sync_time);
+
+        std::lock_guard <std::mutex> lock(log_mutex);
+
+        if ( !log_dirty ) continue;
+
+        while ( fdatasync(fd) == -1 ){
+            if ( errno == EINTR ) continue;
+
+            perror("sync");
+            return;
+        }
+
+        log_dirty = false;
     }
-
-    return true;
 }
 
-bool ParseInt(const std::string &s, int &value){
-    if ( !isInteger(s) || s.size() > size_t(9) ) return false;
-
-    value = stoi(s);
-    return true;
-}
-
-void LogAppend(const std::string &filename, const std::string &line){
-    if ( !persistenceEnabled ) return;
-
-    std::ofstream file(filename, std::ios::app);
-    file << line << '\n';
-}
-
-std::string HandleCommand(MatchingEngine &engine, const std::string &msg){
+CommandType CheckCommand(const std::string &msg, Order &order){
     std::vector <std::string> vec = divide(msg);
 
-    if ( vec.empty() ) return "Empty Query";
+    if ( vec.empty() ) return CommandType::Invalid;
 
     if ( vec[0] == "ADD" ){
-        Order order;
-
-        if ( vec.size() != 7 ) return "Invalid Order";
+        if ( vec.size() != 7 ) return CommandType::Invalid;
         
-        if ( !ParseInt(vec[1], order.orderId) ) return "Invalid Order";
-        if ( !ParseInt(vec[2], order.price) ) return "Invalid Order";
-        if ( !ParseInt(vec[3], order.quantity) ) return "Invalid Order";
-
-        if ( vec[4] != "BUY" && vec[4] != "SELL" ) return "Invalid Order";
-        if ( vec[5] != "LIMIT" && vec[5] != "MARKET" ) return "Invalid Order";
+        if (
+            !ParseInt(vec[1], order.orderId) ||
+            !ParseInt(vec[2], order.price) || 
+            !ParseInt(vec[3], order.quantity) || 
+            (vec[4] != "BUY" && vec[4] != "SELL") || 
+            (vec[5] != "LIMIT" && vec[5] != "MARKET")
+        ){
+            
+            return CommandType::Invalid;
+        }
 
         
         order.side = vec[4] == "BUY" ? Side::Buy : Side::Sell;
         order.type = vec[5] == "LIMIT" ? OrderType::Limit : OrderType::Market;
         order.instrument = vec[6];
+        
+        if ( !IsValidOrder(order) ) return CommandType::Invalid;
 
-        auto verdict = engine.AddOrder(order);
-
-        if ( verdict == AddOrderResult::Accepted ){
-            LogAppend(logPath, msg);
-
-            return "Accepted";
-        }
-        if ( verdict == AddOrderResult::DuplicateId ) return "Duplicate Id";
-
-        return "Invalid Order";
+        return CommandType::Add;
     }
 
     if ( vec[0] == "CANCEL" ){
-        int orderId;
-
-        if ( vec.size() != 2 || !ParseInt(vec[1], orderId) ){
-            return "Invalid 'Cancel' query";
+        if ( vec.size() != 2 || !ParseInt(vec[1], order.orderId) || order.orderId < 0 ){
+            return CommandType::Invalid;
         }
         
-        CancelResult verdict = engine.CancelOrder(orderId);
+        return CommandType::Cancel;
+    }
 
-        if ( verdict == CancelResult::Cancelled ){
-            LogAppend(logPath, msg);
-
-            return "Cancelled";
+    if ( vec[0] == "GET" ){
+        if ( vec.size() != 2 || !ParseInt(vec[1], order.orderId) || order.orderId < 0 ){
+            return CommandType::Invalid;
         }
+
+        return CommandType::Get;
+    }
+
+    if ( vec[0] == "TRADES" ){
+        if ( vec.size() != 1 ) return CommandType::Invalid;
+
+        return CommandType::Trades;
+    }
+
+    return CommandType::Invalid;
+}
+
+std::string HandleCommand(MatchingEngine &engine, const Order &order, const CommandType &type){
+    if ( type == CommandType::Add ){
+        auto verdict = engine.AddOrder(order);
+
+        if ( verdict == AddOrderResult::Accepted ) return "Accepted";
+        if ( verdict == AddOrderResult::DuplicateId ) return "Duplicate Id";
+
+        return "Invalid Query";
+    }
+
+    if ( type == CommandType::Cancel ){
+        auto verdict = engine.CancelOrder(order.orderId);
+
+        if ( verdict == CancelResult::Cancelled ) return "Cancelled";
         
         return "Not Found";
     }
 
-    if ( vec[0] == "GET" ){
-        int orderId;
+    if ( type == CommandType::Get ){
+        auto result = engine.GetOrder(order.orderId);
 
-        if ( vec.size() != 2 || !ParseInt(vec[1], orderId) ){
-            return "Invalid 'Get' query";
-        }
-
-        auto order = engine.GetOrder(orderId);
-
-        if ( order == std::nullopt ) return "Not Found";
+        if ( result == std::nullopt ) return "Not Found";
 
         return std::string(
-            std::to_string(order -> orderId) + " " + 
-            std::to_string(order -> price) + " " + 
-            std::to_string(order -> quantity) + " " +  
-            (order -> side == Side::Buy ? "Buy" : "Sell") + " " + 
-            (order -> type == OrderType::Limit ? "Limit" : "Market") + " " + 
-            order -> instrument
+            std::to_string(result -> orderId) + " " + 
+            std::to_string(result -> price) + " " + 
+            std::to_string(result -> quantity) + " " +  
+            (result -> side == Side::Buy ? "Buy" : "Sell") + " " + 
+            (result -> type == OrderType::Limit ? "Limit" : "Market") + " " + 
+            result -> instrument
         );
     }
 
-    if ( vec[0] == "TRADES" ){
+    if ( type == CommandType::Trades ){
         return std::to_string(engine.GetTrades().size());
     }
 
     return "Invalid Query";
 }
 
-bool SendAll(int fd, const void *data, size_t size){
-    auto bytes = static_cast <const char*> (data);
-
-    size_t sent = 0;
-
-    while ( sent < size ){
-        ssize_t result = send(
-            fd,
-            bytes + sent,
-            size - sent,
-            MSG_NOSIGNAL
-        );
-
-        if ( result <= 0 ) return false;
-
-        sent += result;
-    }
-    
-    return true;
-}
-
-bool RecvLine(int fd, std::string &pending, std::string &line, void *data, size_t size){
-    line.clear();
-
-    {
-        bool found = false;
-        int idx = -1;
-
-        for ( int i = 0; size_t(i) < pending.size(); i++ ){
-            if ( pending[i] == '\n' ){
-                found = true;
-                idx = i;
-                
-                break;
-            }
-        }
-
-        if ( found ){
-            std::string next;
-
-            for ( int i = 0; size_t(i) < pending.size(); i++ ){
-                if ( i < idx ) line.push_back(pending[i]);
-                if ( i > idx ) next.push_back(pending[i]);
-            }
-
-            std::swap(pending, next);
-
-            return true;
-        }
-    }
-    
-    auto bytes = static_cast <char*> (data);
-
-    int total_received = 0;
-
-    while ( true ){
-        ssize_t bytes_received = recv(fd, bytes, size, 0);
-
-        if ( bytes_received <= 0 ) return false;
-
-        total_received += bytes_received;
-
-        for ( int i = 0; i < bytes_received; i++ ){
-            if ( *(bytes + i) == '\n' ){
-                line += pending;
-                pending.clear();
-
-                for ( int j = i + 1; j < bytes_received; j++ ){
-                    pending.push_back(*(bytes + j));
-                }
-
-                return true;
-            }
-
-            pending.push_back(*(bytes + i));
-        }
-
-        if ( total_received > 1000 ) return false;
-    }
-
-    assert(false);
-}
-
-bool RecvAll(int fd, void *data, size_t size){
-    auto bytes = static_cast <char*> (data);
-
-    int received = 0;
-
-    while ( received < size ){
-        ssize_t result = recv(fd, bytes + received, size - received, 0);
-
-        if ( result <= 0 ) return false;
-
-        received += result;
-    }
-
-    return true;
-}
-
 void HandleClient(int client_fd, MatchingEngine &engine, std::mutex &engine_mutex){
-    char buffer[100];
+    char buffer[MAX_LINE_SIZE];
 
     std::string pending, line;
 
     while ( true ){
-        bool receive_result = RecvLine(
+        auto receive_result = RecvLine(
             client_fd,
             pending,
             line,
@@ -261,100 +214,204 @@ void HandleClient(int client_fd, MatchingEngine &engine, std::mutex &engine_mute
             sizeof(buffer)
         );
 
-        if ( !receive_result ){
+        if ( receive_result == RecvLineResult::Closed ){
             std::cout << "Client disconnected\n";
-
             break;
         }
 
+        if ( receive_result == RecvLineResult::IOError ){
+            perror("receiving from client");
+            break;
+        }
+
+        if ( receive_result == RecvLineResult::TooLarge ){
+            std::cout << "Command size is too large\n";
+            break;
+        }
+
+        Order order;
+        CommandType type = CheckCommand(line, order);
+
         std::string verdict;
+        bool closeConnection = false;
 
-        std::cout << "Line received: " << line << '\n';
-
-        {
-            std::lock_guard <std::mutex> lock(engine_mutex);
-            verdict = HandleCommand(engine, line);
+        if ( type == CommandType::Invalid ){
+            verdict = "Invalid Query";
+        } else{
+            {
+                std::lock_guard <std::mutex> lock(engine_mutex);
+                verdict = HandleCommand(engine, order, type);
+            
+                if ( verdict == "Cancelled" || verdict == "Accepted" ){
+                    std::lock_guard <std::mutex> lock(log_mutex);
+                    
+                    if ( !AppendLogRecord(log_fd, line) ){
+                        verdict = "Persistence Error";
+                        closeConnection = true;
+                    }
+                }
+            }
         }
         
         verdict += '\n';
         line.clear();
         
-        if ( !SendAll(client_fd, verdict.data(), verdict.size()) ){
+        if ( SendAll(client_fd, verdict.data(), verdict.size()) == IOResult::Error ){
             perror("sending to client");
             break;
         }
+
+        if ( closeConnection ) break;
     }
         
     close(client_fd);
 }
 
 void RestoreLog(const std::string &filename, MatchingEngine &engine){
-    if ( !persistenceEnabled ) return; 
+    if ( !persistence_enabled ) return; 
 
     std::ifstream file(filename);
 
     std::string line;
 
     while ( std::getline(file, line) ){
+        if ( file.eof() ) continue;
+
         std::istringstream input(line);
         
-        std::string type;
-        input >> type;
+        std::string type, extra;
+
+        if ( !(input >> type) ) continue;
 
         if ( type == "ADD" ){
             Order order;
             std::string side, type;
 
-            input 
-            >> order.orderId 
-            >> order.price 
-            >> order.quantity 
-            >> side 
-            >> type
-            >> order.instrument;
+            if ( !(input 
+                >> order.orderId 
+                >> order.price 
+                >> order.quantity 
+                >> side 
+                >> type
+                >> order.instrument) 
+            ){
+                continue;
+            }
 
-            order.side = side == "BUY" ? Side::Buy : Side::Sell;
-            order.type = type == "LIMIT" ? OrderType::Limit : OrderType::Market;
+            if ( side == "BUY" ) order.side = Side::Buy;
+            else if ( side == "SELL" ) order.side = Side::Sell;
+            else continue;
+
+            if ( type == "LIMIT" ) order.type = OrderType::Limit;
+            else if ( type == "MARKET" ) order.type = OrderType::Market;
+            else continue;
+
+            if ( input >> extra ) continue;
             
             engine.AddOrder(order);
         } else if ( type == "CANCEL" ){
             int orderId; 
-            input >> orderId;
+            
+            if ( !(input >> orderId) ) continue;
+            if ( input >> extra ) continue;
 
             engine.CancelOrder(orderId);
         }
     }
+
+    std::cout << "Restore successfull\n";
 }
 
 int main(int argc, char *argv[]){
-    int server_port;
+    int server_port = -1;
+    int sync_interval_ms = -1;
 
-    if ( argc < 2 || !ParseInt(argv[1], server_port)  ){
-        server_port = 4000; // default port
+    for ( int i = 1; i < argc;){
+        std::string arg = argv[i];
+
+        if ( arg == "--port" ){
+            if ( i + 1 == argc ){
+                std::cerr << "--port requires a port\n";
+                return 1;
+            }
+
+            if ( !ParseInt(argv[i + 1], server_port) || !(1 <= server_port && server_port <= 65535) ){
+                std::cerr << "Server port must be an integer from 1 to 65535\n";
+                return 1;
+            }
+
+            i += 2;
+        } else if ( arg == "--log" ){
+            if ( i + 1 == argc ){
+                std::cerr << "--log requires a path\n";
+                return 1;
+            }
+            
+            std::string value = argv[i + 1];
+            
+            if ( value.starts_with("--") ){
+                std::cerr << "--log requires a path\n";
+                return 1;
+            }
+
+            log_path = argv[i + 1];
+            i += 2;
+        } else if ( arg == "--sync-interval-ms" ){
+            if ( i + 1 == argc ){
+                std::cerr << "--sync-interval-ms requires a time (ms)\n";
+                return 1;
+            }
+
+            if ( !ParseInt(argv[i + 1], sync_interval_ms) || sync_interval_ms <= 0 ){
+                std::cerr << "Sync interval time must be a positive integer\n";
+                return 1;
+            }
+
+            i += 2;
+        } else{
+            std::cerr << "Unknown argument: " << arg << '\n';
+            return 1;
+        }
     }
 
-    if ( argc >= 4 && std::string(argv[2]) == "--log" ){
-        logPath = argv[3];
+    if ( sync_interval_ms > 0 && log_path.empty() ){
+        std::cerr << "--sync-interval-ms requires --log\n";
+        return 1;
     }
 
-    persistenceEnabled = !logPath.empty();
+    if ( server_port == -1 ){
+        std::cout << "Default port [4000] chosen\n";
+        server_port = 4000;
+    }
+
+    persistence_enabled = !log_path.empty();
+
+    if ( sync_interval_ms == -1 ){
+        keep_syncing = false;
+    } else{
+        keep_syncing = true;
+    }
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
     if ( server_fd == -1 ){
         perror("socket");
-        return 0;
+        return 1;
     }
 
     int opt = 1;
-
-    setsockopt(
+    int setSocket_result = setsockopt(
         server_fd,
         SOL_SOCKET,
         SO_REUSEADDR,
         &opt,
         sizeof(opt)
     );
+
+    if ( setSocket_result == -1 ){
+        perror("setsockopt");
+        return 1;
+    }
 
     sockaddr_in address;
 
@@ -370,22 +427,39 @@ int main(int argc, char *argv[]){
 
     if ( bind_verdict != 0 ){
         perror("bind");
-        return 0;
+        return 1;
     }
 
     int listen_verdict = listen(server_fd, 3);
 
     if ( listen_verdict != 0 ){
         perror("listen");
-        return 0;
+        return 1;
     }
+
+    if ( persistence_enabled ){
+        log_fd = open(
+            log_path.c_str(),
+            O_WRONLY | O_CREAT | O_APPEND,
+            0644
+        );
+
+        if ( log_fd == -1 ){
+            perror("file open");
+            return 1;
+        }
+    }
+
+    std::thread sync_thread(
+        RunLogSyncLoop,
+        log_fd,
+        sync_interval_ms
+    );
 
     MatchingEngine engine;
     std::mutex engine_mutex;
 
-    RestoreLog(logPath, engine);
-
-    std::cout << "Restore successfull\n";
+    RestoreLog(log_path, engine);
 
     while ( true ){
         std::cout << "Waiting for client...\n";
@@ -400,8 +474,7 @@ int main(int argc, char *argv[]){
         );
 
         if ( client_fd == -1 ){
-            std::cout << "Client socket failed\n";
-
+            perror("accept");
             continue;
         }
 
@@ -415,5 +488,10 @@ int main(int argc, char *argv[]){
         ).detach();
     }
 
+    keep_syncing = false;
+    sync_thread.join();
+
     close(server_fd);
+
+    if ( persistence_enabled ) close(log_fd);
 }

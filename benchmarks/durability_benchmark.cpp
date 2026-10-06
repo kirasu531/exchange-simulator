@@ -1,4 +1,3 @@
-#include "network_bench.hpp"
 #include "matching_engine.hpp"
 #include "network_utils.hpp"
 
@@ -14,37 +13,53 @@
 #include <vector>
 #include <string>
 
-std::mt19937 rng(1337);
-
 #define rnd(l, r) uniform_int_distribution <int> (l, r)(rng)
 
-void PrintTests(const std::vector <Test> &tests){
-    std::cout << std::fixed << std::setprecision(3);
+std::mt19937 rng(1337);
 
-    for ( auto &test: tests ){
-        std::cout << test.type << ' '
-        << test.operations << ' '
-        << test.time << "(s) "
-        << test.totalRuns << ' '
-        << test.trades << '\n';
-    }
-}
+int operationCount, totalTrades = 0, client_fd;
 
-int operationCount, totalTrades = 0;
-
-std::chrono::time_point<std::chrono::steady_clock> start;
+std::chrono::time_point<std::chrono::steady_clock> start, latency_start;
 
 std::vector <std::string> orders;
+std::string pending, line;
+
+std::vector <double> latencies;
+
+struct Test{
+    std::string type;
+    int operations;
+    int trades;
+    double time;
+    int throughput; // ops/s
+    double avgLatency; // ms
+    double p50; 
+    double p95; 
+    double p99; 
+
+    void print() const{
+        std::cout
+        << type << ' '
+        << operations << ' '
+        << trades << ' '
+        << time << ' ' 
+        << throughput << ' '
+        << avgLatency << ' '
+        << p50 << ' '
+        << p95 << ' '
+        << p99 << '\n';
+    }
+};
 
 void ResetRng(){ 
     rng = std::mt19937(1337);
 }
 
-void ResetTime(){
+void ResetTime(auto &start){
     start = std::chrono::steady_clock::now();
 }
 
-double getExecTime(){
+double GetRuntimeSec(const auto &start){
     auto duration = std::chrono::steady_clock::now() - start;
 
     return std::chrono::duration <double> (duration).count();
@@ -63,11 +78,9 @@ std::string CancelToStr(const int &orderId){
     return "CANCEL " + std::to_string(orderId) + '\n';
 }
 
-std::string pending, line;
-
-int client_fd;
-
 void RoundTrip(const std::string &command, void *data, size_t size, const std::string &verdict){
+    ResetTime(latency_start);
+
     if ( SendAll(client_fd, command.data(), command.size()) == IOResult::Error ){
         perror("Sending to server");
         exit(1);
@@ -87,7 +100,7 @@ void RoundTrip(const std::string &command, void *data, size_t size, const std::s
     }
 
     if ( receive_result == RecvLineResult::IOError ){
-        perror("receiving from server");
+        perror("receive from server");
         exit(1);
     }
 
@@ -95,6 +108,8 @@ void RoundTrip(const std::string &command, void *data, size_t size, const std::s
         std::cout << "Wrong verdict\n";
         exit(1);
     }
+
+    latencies.push_back(GetRuntimeSec(latency_start) * 1'000);
 }
 
 void GetTrades(void *data, size_t size){
@@ -112,7 +127,7 @@ void GetTrades(void *data, size_t size){
     auto receive_result = RecvLine(client_fd, pending, line, data, size);
     
     if ( receive_result == RecvLineResult::Closed ){
-        std::cout << "Server closed unexpectedly\n";
+        std::cout << "Server closed\n";
         exit(1);
     }
 
@@ -144,13 +159,13 @@ double RunMostlyResting(){
     pending.clear();
     line.clear();
 
-    ResetTime();
+    ResetTime(start);
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
     }
 
-    double runtime = getExecTime();
+    double runtime = GetRuntimeSec(start);
     GetTrades(data, sizeof(data));
 
     return runtime;
@@ -192,13 +207,13 @@ double RunManyInstruments(){
     pending.clear();
     line.clear();
 
-    ResetTime();
+    ResetTime(start);
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
     }
 
-    double runtime = getExecTime();
+    double runtime = GetRuntimeSec(start);
     GetTrades(data, sizeof(data));
 
     return runtime;
@@ -206,6 +221,8 @@ double RunManyInstruments(){
 
 double RunCancelHeavy(){
     ResetRng();
+
+    std::vector<std::string> cancel(operationCount);
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         orders[orderId] = AddOrderToStr(Order{
@@ -216,23 +233,25 @@ double RunCancelHeavy(){
             .type = OrderType::Limit,
             .instrument = "BTC"
         });
+
+        cancel[orderId] = CancelToStr(orderId);
     }
 
     char data[100];
     pending.clear();
     line.clear();
 
-    ResetTime();
+    ResetTime(start);
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
     }
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
-        RoundTrip(CancelToStr(orderId), data, sizeof(data), "Cancelled");
+        RoundTrip(cancel[orderId], data, sizeof(data), "Cancelled");
     }
 
-    double runtime = getExecTime();
+    double runtime = GetRuntimeSec(start);
     GetTrades(data, sizeof(data));
     
     return runtime;
@@ -243,7 +262,7 @@ double RunRandom(){
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         orders[orderId] = AddOrderToStr(Order{
-            .orderId = orderId,
+            .orderId = orderId, 
             .price = std::rnd(1, 100000),
             .quantity = std::rnd(1, 100000),
             .side = std::rnd(0, 1) ? Side::Sell : Side::Buy,
@@ -256,13 +275,13 @@ double RunRandom(){
     pending.clear();
     line.clear();
 
-    ResetTime();
+    ResetTime(start);
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
     }
 
-    double runtime = getExecTime();
+    double runtime = GetRuntimeSec(start);
     GetTrades(data, sizeof(data));
 
     return runtime;
@@ -288,77 +307,38 @@ double RunMostlyCrossing(){
     pending.clear();
     line.clear();
 
-    ResetTime();
+    ResetTime(start);
 
     for ( int orderId = 0; orderId < operationCount; orderId++ ){
         RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
     }
 
-    double runtime = getExecTime();
+    double runtime = GetRuntimeSec(start);
     GetTrades(data, sizeof(data));
 
     return runtime;
 }
 
-double RunLargeSweep(){
-    ResetRng();
-
-    for ( int orderId = 0; orderId < operationCount; orderId++ ){
-        if ( orderId < operationCount - 5 ){
-            orders[orderId] = AddOrderToStr(Order{
-                .orderId = orderId,
-                .price = 5,
-                .quantity = 1,
-                .side = Side::Sell,
-                .type = OrderType::Limit,
-                .instrument = "BTC"
-            });
-        } else{
-            orders[orderId] = AddOrderToStr(Order{
-                .orderId = orderId,
-                .price = 10,
-                .quantity = std::rnd(operationCount / 5, operationCount / 4),
-                .side = Side::Buy,
-                .type = OrderType::Limit,
-                .instrument = "BTC"
-            });
-        }
-    }
-
-    char data[100];
-    pending.clear();
-    line.clear();
-
-    for ( int orderId = 0; orderId < operationCount - 5; orderId++ ){
-        RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
-    }
-
-    ResetTime();
-
-    for ( int orderId = operationCount - 5; orderId < operationCount; orderId++ ){
-        RoundTrip(orders[orderId], data, sizeof(data), "Accepted");
-    }
-
-    double runtime = getExecTime();
-    GetTrades(data, sizeof(data));
-
-    return runtime;
-}
-
-double RunTest(int testId){
+double RunTest(const int &testId){
     if ( testId == 0 ) return RunMostlyResting();
     if ( testId == 1 ) return RunCancelHeavy();
     if ( testId == 2 ) return RunRandom();
     if ( testId == 3 ) return RunMostlyCrossing();
-    if ( testId == 4 ) return RunLargeSweep();
-    if ( testId == 5 ) return RunManyInstruments();
+    if ( testId == 4 ) return RunManyInstruments();
     
     return -1;
+}
+
+double GetLatency(int percentage){
+    int idx = ((int)latencies.size() * percentage + 99) / 100;
+
+    return latencies[idx - 1];
 }
 
 int main(int argc, char *argv[]){
     if ( argc < 3 ){
         std::cout << "Usage: " << argv[0] << " " << "<workload> <operations>\n";
+
         return 1;
     }
 
@@ -368,6 +348,7 @@ int main(int argc, char *argv[]){
     operationCount = std::stoi(argv[2]);
 
     orders.resize(operationCount);
+    latencies.reserve(operationCount * 2);
 
     int server_port = 4000;
 
@@ -402,7 +383,6 @@ int main(int argc, char *argv[]){
         "CancelHeavy",
         "Random",
         "MostlyCrossing",
-        "LargeSweep",
         "ManyInstruments"
     };
 
@@ -421,19 +401,35 @@ int main(int argc, char *argv[]){
     
     Test test = Test{
         .type = type,
-        .time = RunTest(idx),
-        .totalRuns = 1,
-        .trades = totalTrades
+        .operations = operationCount,
+        .time = RunTest(idx)
     };
+
+    test.trades = totalTrades;
 
     if ( type == "CancelHeavy" ){
         test.operations = operationCount * 2;
-    } else if ( type == "LargeSweep" ){
-        test.operations = 5;
-    } else{
-        test.operations = operationCount;
     }
+
+    test.throughput = (int)(test.operations / test.time);
+
+    { // calculate latency
+        sort(latencies.begin(), latencies.end());
+
+        double total = 0;
+
+        for ( auto &time: latencies ){
+            total += time;
+        }
+
+        test.avgLatency = total / (double)latencies.size();
+        test.p50 = GetLatency(50);
+        test.p95 = GetLatency(95);
+        test.p99 = GetLatency(99);
+    }
+
+    std::cout << std::fixed << std::setprecision(3);
+    test.print();
     
-    PrintTests(std::vector <Test> {test});
     close(client_fd);
 }

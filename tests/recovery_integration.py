@@ -56,6 +56,7 @@ def start_server(port, log_path):
     return subprocess.Popen(
         [
             server_path,
+            "--port",
             str(port),
             "--log",
             str(log_path)
