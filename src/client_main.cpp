@@ -1,121 +1,55 @@
+#include "network_utils.hpp"
+
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <iostream>
 #include <cassert>
+#include <charconv>
+#include <string>
 
-bool SendAll(int fd, const void *data, size_t size){
-    auto bytes = static_cast <const char*> (data);
+constexpr size_t MAX_LINE_SIZE = 256;
 
-    size_t sent = 0;
+bool ParseInt(const std::string& s, int& value) {
+    if ( s.empty() ) return false;
 
-    while ( sent < size ){
-        ssize_t result = send(
-            fd,
-            bytes + sent,
-            size - sent,
-            MSG_NOSIGNAL
-        );
+    auto [ptr, ec] = std::from_chars(
+        s.data(),
+        s.data() + s.size(),
+        value
+    );
 
-        if ( result <= 0 ) return false;
-
-        sent += result;
-    }
-    
-    return true;
-}
-
-int RecvAll(int fd, void *data, size_t size){
-    auto bytes = static_cast <char*> (data);
-
-    int received = 0;
-
-    while ( received < size ){
-        ssize_t result = recv(
-            fd,
-            bytes + received,
-            size - received,
-            0
-        );
-
-        if ( result <= 0 ) break;
-
-        received += result;
-    }
-
-    return received;
-}
-
-bool RecvLine(int fd, std::string &pending, std::string &line, void *data, size_t size){
-    line.clear();
-
-    {
-        bool found = false;
-        int idx = -1;
-
-        for ( int i = 0; size_t(i) < pending.size(); i++ ){
-            if ( pending[i] == '\n' ){
-                found = true;
-                idx = i;
-                
-                break;
-            }
-        }
-
-        if ( found ){
-            std::string next;
-
-            for ( int i = 0; size_t(i) < pending.size(); i++ ){
-                if ( i < idx ) line.push_back(pending[i]);
-                if ( i > idx ) next.push_back(pending[i]);
-            }
-
-            std::swap(pending, next);
-
-            return true;
-        }
-    }
-    
-    auto bytes = static_cast <char*> (data);
-
-    int total_received = 0;
-
-    while ( true ){
-        ssize_t bytes_received = recv(fd, bytes, size, 0);
-
-        if ( bytes_received <= 0 ) return false;
-
-        total_received += bytes_received;
-
-        for ( int i = 0; i < bytes_received; i++ ){
-            if ( *(bytes + i) == '\n' ){
-                line += pending;
-                pending.clear();
-
-                for ( int j = i + 1; j < bytes_received; j++ ){
-                    pending.push_back(*(bytes + j));
-                }
-
-                return true;
-            }
-
-            pending.push_back(*(bytes + i));
-        }
-
-        if ( total_received > 1000 ) return false;
-    }
-
-    assert(false);
+    return ec == std::errc{} && ptr == s.data() + s.size();
 }
 
 int main(int argc, char *argv[]){
-    int server_port;
+    int server_port = -1;
 
-    if ( argc < 2 ){
-        server_port = 4000;
-    } else{
-        server_port = std::stoi(argv[1]);
+    for ( int i = 1; i < argc;){
+        std::string arg = argv[i];
+
+        if ( arg == "--port" ){
+            if ( i + 1 == argc ){
+                std::cerr << "--port requires a port\n";
+                return 1;
+            }
+
+            if ( !ParseInt(argv[i + 1], server_port) || !(1 <= server_port && server_port <= 65535) ){
+                std::cerr << "Server port must be an integer from 1 to 65535\n";
+                return 1;
+            }
+
+            i += 2;
+        } else{
+            std::cerr << "Unknown argument: " << arg << '\n';
+            return 1;
+        }
+    }
+
+    if ( server_port == -1 ){
+        std::cout << "Default port [4000] chosen\n";
+        server_port = 4000; 
     }
 
     int client_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -147,16 +81,36 @@ int main(int argc, char *argv[]){
     std::cout << "Connection successful\n";
 
     std::string pending, line;
-    char data[100];
+    char data[MAX_LINE_SIZE];
 
     std::string command;
 
     while (std::getline(std::cin, command)){
         command += '\n';
 
-        assert(SendAll(client_fd, command.data(), command.size()));
+        IOResult send_result = SendAll(client_fd, command.data(), command.size());
 
-        assert(RecvLine(client_fd, pending, line, data, sizeof(data)));
+        if ( send_result == IOResult::Error ){
+            perror("send");
+            return 1;
+        }
+
+        RecvLineResult recv_result = RecvLine(client_fd, pending, line, data, sizeof(data));
+        
+        if ( recv_result == RecvLineResult::IOError ){
+            perror("recvline");
+            return 1;
+        }  
+
+        if ( recv_result == RecvLineResult::Closed ){
+            std::cout << "Server closed\n";
+            break;
+        }
+
+        if ( recv_result == RecvLineResult::TooLarge ){
+            std::cerr << "Receive result is too large\n";
+            return 1;
+        }
 
         std::cout << line << '\n';
     }

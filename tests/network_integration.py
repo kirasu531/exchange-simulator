@@ -56,7 +56,7 @@ def run_test(test_function):
     port = get_free_port()
 
     server = subprocess.Popen(
-        [server_path, str(port)],
+        [server_path, "--port", str(port)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT
     )
