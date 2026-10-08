@@ -10,19 +10,8 @@ WORKLOADS=(
     Random
 )
 
-INTERVALS=(
-    1
-    2
-    5
-    10
-    20
-)
-
 SIZES=(
     1000
-    5000
-    10000
-    20000
 )
 
 cmake --build build-release -j > /dev/null
@@ -57,15 +46,14 @@ median() {
 run_once() {
     workload="$1"
     operations="$2"
-    interval="$3"
 
     > "$log_path"
-    ./build-release/exchange_server "--port" "$PORT" "--log" "$log_path" "--sync-interval-ms" "$interval" > /dev/null &
+    ./build-release/exchange_server "--port" "$PORT" "--log" "$log_path" > /dev/null &
     server_pid=$!
 
     sleep 0.1
 
-    run_result=$(./build-release/exchange_durability "$workload" "$operations" "$interval")
+    run_result=$(./build-release/exchange_durability "$workload" "$operations")
 
     cleanup
 }
@@ -73,7 +61,6 @@ run_once() {
 run_test() {
     workload="$1"
     operations="$2"
-    interval="$3"
 
     times=()
     throughputs=()
@@ -81,17 +68,15 @@ run_test() {
     p50s=()
     p95s=()
     p99s=()
-    sync_counts=()
-    max_unsynceds=()
 
     timed_operations=""
     trades=""
 
     for ((run = 1; run <= RUNS; run++)); do
-        run_once "$workload" "$operations" "$interval"
+        run_once "$workload" "$operations"
         result="$run_result"
 
-        read -r type timed_operations trades time throughput avg_latency p50 p95 p99 sync_count max_unsynced <<< "$result"
+        read -r type timed_operations trades time throughput avg_latency p50 p95 p99 <<< "$result"
 
         times+=("$time")
         throughputs+=("$throughput")
@@ -99,8 +84,6 @@ run_test() {
         p50s+=("$p50")
         p95s+=("$p95")
         p99s+=("$p99")
-        sync_counts+=("$sync_count")
-        max_unsynceds+=("$max_unsynced")
     done
 
     median_time=$(median "${times[@]}")
@@ -109,10 +92,8 @@ run_test() {
     median_p50=$(median "${p50s[@]}")
     median_p95=$(median "${p95s[@]}")
     median_p99=$(median "${p99s[@]}")
-    median_sync_count=$(median "${sync_counts[@]}")
-    median_max_unsynced=$(median "${max_unsynced[@]}")
 
-    printf "%s %s %s %.3f(s) %.0f %.3f(ms) %.3f(ms) %.3f(ms) %.3f(ms) %d %d %d(ms) %d\n" \
+    printf "%s %s %s %.3f(s) %.0f %.3f(ms) %.3f(ms) %.3f(ms) %.3f(ms) %d\n" \
         "$workload" \
         "$timed_operations" \
         "$trades" \
@@ -122,21 +103,16 @@ run_test() {
         "$median_p50" \
         "$median_p95" \
         "$median_p99" \
-        "$median_sync_count" \
-        "$median_max_unsynced" \
-        "$interval" \
         "$RUNS"
 }
 
-echo "type operations trades time(s) throughput avgLatency(ms) p50(ms) p95(ms) p99(ms) sync_count max_unsynced interval_time runs"
-echo "___________________________________________________________________________________________________________________________"
+echo "type operations trades time(s) throughput avgLatency(ms) p50(ms) p95(ms) p99(ms) runs"
+echo "_____________________________________________________________________________________"
 
 if [ "$#" -eq 0 ]; then
     for workload in "${WORKLOADS[@]}"; do
         for operations in "${SIZES[@]}"; do
-            for interval in "${INTERVALS[@]}"; do
-                run_test "$workload" "$operations" "$interval"
-            done
+            run_test "$workload" "$operations"
         done
     done
 
@@ -144,21 +120,11 @@ elif [ "$#" -eq 1 ]; then
     workload="$1"
 
     for operations in "${SIZES[@]}"; do
-        for interval in "${INTERVALS[@]}"; do
-            run_test "$workload" "$operations" "$interval"
-        done
+        run_test "$workload" "$operations"
     done
 
 elif [ "$#" -eq 2 ]; then
-    workload="$1"
-    operations="$2"
-
-    for interval in "${INTERVALS[@]}"; do
-        run_test "$workload" "$operations" "$interval"
-    done
-
-elif [ "$#" -eq 3 ]; then
-    run_test "$1" "$2" "$3"
+    run_test "$1" "$2"
 
 else
     echo "Usage:"
