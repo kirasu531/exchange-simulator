@@ -12,6 +12,7 @@
 #include <cassert>
 #include <vector>
 #include <string>
+#include <thread>
 
 #define rnd(l, r) uniform_int_distribution <int> (l, r)(rng)
 
@@ -47,7 +48,7 @@ struct Test{
         << avgLatency << ' '
         << p50 << ' '
         << p95 << ' '
-        << p99 << '\n';
+        << p99 << ' ';
     }
 };
 
@@ -336,10 +337,16 @@ double GetLatency(int percentage){
 }
 
 int main(int argc, char *argv[]){
+    int interval_time = 1000;
+
     if ( argc < 3 ){
         std::cout << "Usage: " << argv[0] << " " << "<workload> <operations>\n";
 
         return 1;
+    }
+
+    if ( argc >= 4 ){
+        interval_time = std::stoi(argv[3]) * 2;
     }
 
     std::string type;
@@ -430,6 +437,23 @@ int main(int argc, char *argv[]){
 
     std::cout << std::fixed << std::setprecision(3);
     test.print();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(interval_time));
+
+    std::string qry = "STATS\n";
+    IOResult send_result = SendAll(client_fd, qry.data(), qry.size());
+
+    if ( send_result == IOResult::Error ){
+        perror("send");
+        return 1;
+    }
+
+    std::string pending, line;
+    char data[100];
+
+    RecvLine(client_fd, pending, line, data, sizeof(data));
+
+    std::cout << line << '\n';
     
     close(client_fd);
 }

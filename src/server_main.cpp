@@ -23,7 +23,8 @@ enum class CommandType{
     Cancel,
     Get,
     Trades,
-    Invalid
+    Invalid,
+    Stats
 };
 
 constexpr size_t MAX_LINE_SIZE = 256;
@@ -36,6 +37,12 @@ int log_fd;
 std::mutex log_mutex;
 
 std::atomic <bool> keep_syncing;
+
+struct PersistenceStats{
+    int sync_count{0};
+    int unsynced_commands{0};
+    int max_unsynced_commands{0}; 
+} stats;
 
 std::vector <std::string> divide(const std::string &s){
     std::vector <std::string> str;
@@ -80,6 +87,8 @@ bool AppendLogRecord(int fd, const std::string &line){
         return false;
     }
 
+    stats.unsynced_commands += 1;
+    
     log_dirty = true;
     return true;
 }
@@ -101,6 +110,10 @@ void RunLogSyncLoop(int fd, int T){
             perror("sync");
             return;
         }
+
+        stats.max_unsynced_commands = std::max(stats.max_unsynced_commands, stats.unsynced_commands);
+        stats.sync_count += 1;
+        stats.unsynced_commands = 0;
 
         log_dirty = false;
     }
@@ -157,6 +170,12 @@ CommandType CheckCommand(const std::string &msg, Order &order){
         return CommandType::Trades;
     }
 
+    if ( vec[0] == "STATS" ){
+        if ( vec.size() != 1 ) return CommandType::Invalid;
+
+        return CommandType::Stats;
+    }
+
     return CommandType::Invalid;
 }
 
@@ -195,6 +214,12 @@ std::string HandleCommand(MatchingEngine &engine, const Order &order, const Comm
 
     if ( type == CommandType::Trades ){
         return std::to_string(engine.GetTrades().size());
+    }
+
+    if ( type == CommandType::Stats ){
+        std::lock_guard <std::mutex> lock(log_mutex);
+
+        return std::to_string(stats.sync_count) + " " + std::to_string(stats.max_unsynced_commands);
     }
 
     return "Invalid Query";
