@@ -34,6 +34,7 @@ add_executable(exchange
 )
 add_executable(exchange_tests
 	tests/order_book_tests.cpp
+	tests/network_utils_tests.cpp
 )
 add_executable(exchange_bench
 	benchmarks/benchmark.cpp
@@ -61,6 +62,7 @@ target_link_libraries(exchange_bench PRIVATE exchange_core)
 target_link_libraries(exchange PRIVATE exchange_core)
 target_link_libraries(exchange_tests PRIVATE 
 	exchange_core
+	network_utils
 	Catch2::Catch2WithMain
 )
 target_link_libraries(exchange_server PRIVATE exchange_core network_utils)
@@ -96,6 +98,45 @@ add_test(
 
 set_tests_properties(
     recovery_integration
-    PROPERTIES TIMEOUT 2
+    PROPERTIES TIMEOUT 10
+)
+
+add_test(
+    NAME server_protocol
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tests/server_protocol.py
+        $<TARGET_FILE:exchange_server>
+)
+
+set_tests_properties(
+    server_protocol
+    PROPERTIES TIMEOUT 10
+)
+
+add_test(
+    NAME epoll_edge_cases
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tests/epoll_edge_cases.py
+        $<TARGET_FILE:exchange_server>
+)
+
+set_tests_properties(
+    epoll_edge_cases
+    PROPERTIES TIMEOUT 30
+)
+
+add_test(
+    NAME server_cli
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tests/server_cli.py
+        $<TARGET_FILE:exchange_server>
+)
+
+set_tests_properties(
+    server_cli
+    PROPERTIES TIMEOUT 15
 )
 

@@ -1,0 +1,8 @@
+# clangd 14 misdetects the GCC toolchain (partial gcc-12 install) and
+# can't find libstdc++ headers. Point it at the real g++-11 paths.
+CompileFlags:
+  Add:
+    - -isystem/usr/include/c++/11
+    - -isystem/usr/include/x86_64-linux-gnu/c++/11
+    - -isystem/usr/include/c++/11/backward
+    - -isystem/usr/lib/gcc/x86_64-linux-gnu/11/include

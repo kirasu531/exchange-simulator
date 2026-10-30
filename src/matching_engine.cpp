@@ -5,7 +5,7 @@
 #include <optional>
 
 AddOrderResult MatchingEngine::AddOrder(const Order &newOrder){
-    if ( type.find(newOrder.orderId) != type.end() ) return AddOrderResult::DuplicateId;
+    if ( order_instruments.find(newOrder.orderId) != order_instruments.end() ) return AddOrderResult::DuplicateId;
 
     if ( !IsValidOrder(newOrder) ) return AddOrderResult::InvalidOrder;
     
@@ -13,30 +13,30 @@ AddOrderResult MatchingEngine::AddOrder(const Order &newOrder){
 
     incoming.arrivalSequence = nextSequence++;
     
-    type[incoming.orderId] = incoming.instrument;
+    order_instruments[incoming.orderId] = incoming.instrument;
 
-    groups[incoming.instrument].AddOrder(incoming, nextTradeNumber);
+    books[incoming.instrument].AddOrder(incoming, nextTradeNumber);
 
     return AddOrderResult::Accepted;
 }
 
-CancelResult MatchingEngine::CancelOrder(int Id){
-    if ( type.find(Id) == type.end() ) return CancelResult::NotFound;
+CancelResult MatchingEngine::CancelOrder(int orderId){
+    if ( order_instruments.find(orderId) == order_instruments.end() ) return CancelResult::NotFound;
 
-    return groups[type[Id]].RemoveOrder(Id);
+    return books[order_instruments[orderId]].CancelOrder(orderId);
 }
 
-std:: optional<Order> MatchingEngine::GetOrder(int Id){
-    if ( type.find(Id) == type.end() ) return std::nullopt;
+std:: optional<Order> MatchingEngine::GetOrder(int orderId){
+    if ( order_instruments.find(orderId) == order_instruments.end() ) return std::nullopt;
 
-    return groups[type[Id]].GetOrder(Id);
+    return books[order_instruments[orderId]].GetOrder(orderId);
 }
 
 std::vector <Trade> MatchingEngine::GetTrades(){
     std::vector <Trade> trade_log;
     
-    for ( auto &[instrument, OrderBook]: groups ){
-        for ( auto trades: OrderBook.GetTrades() ){
+    for ( auto &[instrument, book]: books ){
+        for ( auto trades: book.GetTrades() ){
             trade_log.push_back(trades);
         }
     }

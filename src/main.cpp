@@ -33,20 +33,20 @@ int main(){
                 .instrument = instrument
             });
         } else if ( op == "rmv" ){
-            int Id; 
-            
-            std::cin >> Id;
+            int orderId;
 
-            engine.CancelOrder(Id);
+            std::cin >> orderId;
+
+            engine.CancelOrder(orderId);
         } else if ( op == "get" ){
-            int Id; 
-            
-            std::cin >> Id;
+            int orderId;
 
-            auto curOrder = engine.GetOrder(Id);
+            std::cin >> orderId;
+
+            auto curOrder = engine.GetOrder(orderId);
 
             if ( curOrder ){
-                engine.GetOrder(Id) -> print();
+                curOrder -> print();
             }
         }
     }

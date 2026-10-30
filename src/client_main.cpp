@@ -8,8 +8,11 @@
 #include <cassert>
 #include <charconv>
 #include <string>
+#include <fcntl.h>
+#include <sys/epoll.h>
+#include <iterator>
 
-constexpr size_t MAX_LINE_SIZE = 256;
+char data_read[READ_BUDGET];
 
 bool ParseInt(const std::string& s, int& value) {
     if ( s.empty() ) return false;
@@ -52,11 +55,18 @@ int main(int argc, char *argv[]){
         server_port = 4000; 
     }
 
-    int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int client_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 
     if ( client_fd < 0 ){
         perror("socket");
-        return 0;
+        return 1;
+    }
+
+    int flags = fcntl(client_fd, F_GETFL);
+
+    if ( flags == -1 || fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) == -1 ){
+        perror("fcntl");
+        return 1;
     }
 
     sockaddr_in address;
@@ -65,54 +75,152 @@ int main(int argc, char *argv[]){
     address.sin_port = htons(server_port);
     address.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    int connect_verdict = connect(
-        client_fd, 
-        reinterpret_cast <const sockaddr*> (&address), 
-        sizeof(address)
-    );
+    while ( true ){
+        int connect_verdict = connect(
+            client_fd, 
+            reinterpret_cast <const sockaddr*> (&address), 
+            sizeof(address)
+        );
 
-    if ( connect_verdict == -1 ){
-        perror("connect");
-        close(client_fd);
+        if ( connect_verdict == -1 ){
+            if ( errno == EINPROGRESS ) continue;
 
-        return 0;
-    }
-
-    std::cout << "Connection successful\n";
-
-    std::string pending, line;
-    char data[MAX_LINE_SIZE];
-
-    std::string command;
-
-    while (std::getline(std::cin, command)){
-        command += '\n';
-
-        IOResult send_result = SendAll(client_fd, command.data(), command.size());
-
-        if ( send_result == IOResult::Error ){
-            perror("send");
+            perror("connect");
+            close(client_fd);
             return 1;
-        }
-
-        RecvLineResult recv_result = RecvLine(client_fd, pending, line, data, sizeof(data));
-        
-        if ( recv_result == RecvLineResult::IOError ){
-            perror("recvline");
-            return 1;
-        }  
-
-        if ( recv_result == RecvLineResult::Closed ){
-            std::cout << "Server closed\n";
+        } else{
+            std::cout << "Connection successful\n";
             break;
         }
+    }
+    
+    int epfd = epoll_create1(EPOLL_CLOEXEC);
 
-        if ( recv_result == RecvLineResult::TooLarge ){
-            std::cerr << "Receive result is too large\n";
+    if ( epfd == -1 ){
+        perror("epoll_create1");
+        return 1;
+    }
+
+    epoll_event event{};
+    event.events = EPOLLIN;
+    event.data.fd = client_fd;
+
+    if ( epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &event) == -1 ){
+        perror("epoll_ctl");
+        return 1;
+    }
+
+    event = epoll_event{};
+    event.events = EPOLLIN;
+    event.data.fd = STDIN_FILENO;
+
+    if ( epoll_ctl(epfd, EPOLL_CTL_ADD, STDIN_FILENO, &event) == -1 ){
+        perror("epoll_ctl STDIN_FILENO");
+        return 1;
+    }
+
+    epoll_event events[64];
+
+    Connection client;
+
+    while ( true ){
+        int count = epoll_wait(epfd, events, std::size(events), -1);
+
+        if ( count == -1 ){
+            if ( errno == EINTR ) continue;
+
+            perror("epoll_wait");
             return 1;
         }
 
-        std::cout << line << '\n';
+        for ( int i = 0; i < count; i++ ){
+            int fd = events[i].data.fd;
+            u_int32_t event_flags = events[i].events;
+
+            if ( fd == client_fd ){
+                if ( event_flags & EPOLLIN ){
+                    auto result = Recv(
+                        client_fd,
+                        client.input_buffer,
+                        data_read,
+                        sizeof(data_read)
+                    );
+
+                    if ( result == IOResult::Closed ){
+                        std::cout << "Server closed\n";
+                        return 0;
+                    }
+                    else if ( result == IOResult::Error ){
+                        perror("Recv");
+                        return 1;
+                    }
+                    else{
+                        std::string &input = client.input_buffer;
+                        std::string pending;
+
+                        for ( size_t i = 0; i < input.size(); i++ ){
+                            if ( input[i] == '\n' ){
+                                std::cout << pending << '\n';
+                                pending.clear();
+                            } else{
+                                pending.push_back(input[i]);
+                            }
+                        }
+
+                        std::swap(pending, input);
+                    }
+                }
+
+                if ( event_flags & EPOLLOUT ){
+                    size_t sent = 0;
+                    auto result = Send(
+                        client_fd,
+                        client.getSendData(),
+                        std::min(SEND_BUDGET, client.pendingBytes()),
+                        sent
+                    );
+
+                    if ( result == IOResult::Closed ){
+                        std::cout << "Server closed\n";
+                        return 0;
+                    }
+                    else if ( result == IOResult::Error ){
+                        perror("Send");
+                        return 1;
+                    }
+                    else{
+                        client.sent_offset += sent;
+                    }
+                }
+            } else{ // stdin
+                std::string line;
+                getline(std::cin, line);
+                
+                client.output_buffer += line + '\n';
+            }
+
+            bool has_pending_output = client.hasPendingData();
+
+            if ( has_pending_output != client.watching_output ){
+                epoll_event ev{};
+                ev.events = EPOLLIN;
+                ev.data.fd = client_fd;
+
+                if ( has_pending_output ) ev.events |= EPOLLOUT;
+
+                if ( epoll_ctl(epfd, EPOLL_CTL_MOD, client_fd, &ev) == -1 ){
+                    perror("epoll_ctl MOD");
+                    return 1;
+                }
+
+                client.watching_output = has_pending_output;
+            }
+
+            if ( !has_pending_output ){
+                client.output_buffer.clear();
+                client.sent_offset = 0;
+            }
+        }
     }
 
     close(client_fd);

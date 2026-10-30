@@ -14,7 +14,7 @@ SIZES=(
     1000
 )
 
-cmake --build build-release -j > /dev/null
+cmake --build build-release -j 4 > /dev/null
 
 server_pid=""
 temp_dir=$(mktemp -d)

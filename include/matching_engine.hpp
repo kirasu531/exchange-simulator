@@ -4,23 +4,21 @@
 
 #include <string>
 #include <map>
-#include <set>
 #include <optional>
 #include <vector>
 #include <unordered_map>
-#include <unordered_set>
 
 struct MatchingEngine{
     private:
-        std::map <std::string, OrderBook> groups;
-        std::unordered_map <int, std::string> type;
+        std::map <std::string, OrderBook> books;
+        std::unordered_map <int, std::string> order_instruments;
         int nextSequence = 0;
         int nextTradeNumber = 0;
 
     public:
         AddOrderResult AddOrder(const Order &newOrder);
-        CancelResult CancelOrder(int Id);
-        std:: optional <Order> GetOrder(int Id);
+        CancelResult CancelOrder(int orderId);
+        std:: optional <Order> GetOrder(int orderId);
         std:: vector <Trade> GetTrades();
         void PrintTrades();
 };

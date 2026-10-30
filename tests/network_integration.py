@@ -1,3 +1,15 @@
+"""
+End-to-end TCP tests for exchange_server.
+
+Each test spawns the server binary once on a fresh port, then drives it
+with real sockets. Covers the basic request/reply flow, engine state
+shared across clients, commands split across TCP writes, and a
+concurrent multi-client stress pass.
+
+Usage: network_integration.py <path-to-exchange_server>
+Registered in CTest as "network_integration".
+"""
+
 import socket
 import subprocess
 import sys
@@ -52,7 +64,7 @@ def expect(actual, expected):
         )
 
 
-def run_test(test_function):
+def run_test(name, test_function):
     port = get_free_port()
 
     server = subprocess.Popen(
@@ -63,11 +75,15 @@ def run_test(test_function):
 
     try:
         test_function(port)
+        print(f"PASS {name}")
+    except Exception as error:
+        print(f"FAIL {name}: {error}")
+        failures.append(name)
     finally:
-        server.terminate();
+        server.terminate()
 
         try:
-            server.wait(timeout=2);
+            server.wait(timeout=2)
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait()
@@ -88,7 +104,7 @@ def test_concurrent_clients(port):
         client_b.close()
 
 
-def basic_test(port):
+def test_basic_flow(port):
     # Client 1: add an order.
     with connect(port) as client:
         client.sendall(b"ADD 1 100 5 BUY LIMIT BTC\n")
@@ -199,8 +215,14 @@ def test_concurrent_stress(port):
             future.result()
 
 
-run_test(basic_test)
-run_test(test_concurrent_clients)
-run_test(test_concurrent_stress)
+failures = []
 
-print("Network integration test passed")
+run_test("basic_flow", test_basic_flow)
+run_test("concurrent_clients", test_concurrent_clients)
+run_test("concurrent_stress", test_concurrent_stress)
+
+if failures:
+    print(f"\n{len(failures)} test(s) failed: {', '.join(failures)}")
+    sys.exit(1)
+
+print("Network integration tests passed")

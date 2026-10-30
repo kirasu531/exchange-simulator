@@ -32,14 +32,14 @@ fi
 
 echo
 
-cmake --build build -j > /dev/null
+cmake --build build -j 4 > /dev/null
 echo "Build successful"
 echo
 
-if [[ "$#" -eq 2 && "$2" == "debug"W ]]; then
-	./build/exchange_server "4000" "--log" "exchange.log" &
+if [[ "$#" -eq 2 && "$2" == "debug" ]]; then
+	./build/exchange_server "--port" "4000" "--log" "exchange.log" &
 else
-	./build/exchange_server "4000" "--log" "exchange.log" > /dev/null & 
+	./build/exchange_server "--port" "4000" "--log" "exchange.log" > /dev/null & 
 fi
 
 server_pid=$!

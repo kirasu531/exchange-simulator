@@ -1,4 +1,3 @@
-#include "network_bench.hpp"
 #include "matching_engine.hpp"
 #include "network_utils.hpp"
 
@@ -18,7 +17,15 @@ std::mt19937 rng(1337);
 
 #define rnd(l, r) uniform_int_distribution <int> (l, r)(rng)
 
-void PrintTests(const std::vector <Test> &tests){
+struct BenchmarkResult{
+    std::string type;
+    int operations;
+    double time;
+    int totalRuns;
+    int trades;
+};
+
+void PrintTests(const std::vector <BenchmarkResult> &tests){
     std::cout << std::fixed << std::setprecision(3);
 
     for ( auto &test: tests ){
@@ -419,7 +426,7 @@ int main(int argc, char *argv[]){
         return 1;
     }
     
-    Test test = Test{
+    BenchmarkResult test = BenchmarkResult{
         .type = type,
         .time = RunTest(idx),
         .totalRuns = 1,
@@ -434,6 +441,6 @@ int main(int argc, char *argv[]){
         test.operations = operationCount;
     }
     
-    PrintTests(std::vector <Test> {test});
+    PrintTests(std::vector <BenchmarkResult> {test});
     close(client_fd);
 }

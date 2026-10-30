@@ -26,7 +26,7 @@ std::string pending, line;
 
 std::vector <double> latencies;
 
-struct Test{
+struct BenchmarkResult{
     std::string type;
     int operations;
     int trades;
@@ -399,7 +399,7 @@ int main(int argc, char *argv[]){
         return 1;
     }
     
-    Test test = Test{
+    BenchmarkResult test = BenchmarkResult{
         .type = type,
         .operations = operationCount,
         .time = RunTest(idx)

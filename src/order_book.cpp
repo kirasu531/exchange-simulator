@@ -61,7 +61,7 @@ AddOrderResult OrderBook::AddOrder(const Order &newOrder, int &nextTradeNumber){
             while ( !Queue.empty() && incoming.quantity > 0 ){
                 auto &cur = Queue.front();
 
-                if ( canceled_orders.find(cur.orderId) != canceled_orders.end() ){
+                if ( cancelled_orders.find(cur.orderId) != cancelled_orders.end() ){
                     Queue.pop();
 
                     continue;
@@ -101,7 +101,7 @@ AddOrderResult OrderBook::AddOrder(const Order &newOrder, int &nextTradeNumber){
             while ( !Queue.empty() && incoming.quantity > 0 ){
                 auto &cur = Queue.front();
 
-                if ( canceled_orders.find(cur.orderId) != canceled_orders.end() ){
+                if ( cancelled_orders.find(cur.orderId) != cancelled_orders.end() ){
                     Queue.pop();
 
                     continue;
@@ -147,11 +147,11 @@ AddOrderResult OrderBook::AddOrder(const Order &newOrder, int &nextTradeNumber){
     return AddOrderResult::Accepted;
 }
 
-CancelResult OrderBook::RemoveOrder(int Id){
-    auto iter = active_orders.find(Id);
+CancelResult OrderBook::CancelOrder(int orderId){
+    auto iter = active_orders.find(orderId);
     
     if ( iter != active_orders.end() ){
-        canceled_orders.insert(Id);
+        cancelled_orders.insert(orderId);
 
         active_orders.erase(iter);
 
@@ -161,8 +161,8 @@ CancelResult OrderBook::RemoveOrder(int Id){
     }
 }
 
-std:: optional <Order> OrderBook::GetOrder(int Id){
-    auto iter = active_orders.find(Id);
+std:: optional <Order> OrderBook::GetOrder(int orderId){
+    auto iter = active_orders.find(orderId);
 
     if ( iter != active_orders.end() ){
         return iter -> second;
@@ -172,14 +172,3 @@ std:: optional <Order> OrderBook::GetOrder(int Id){
 }
 
 std::vector <Trade> OrderBook::GetTrades(){ return trades; } 
-
-void OrderBook::PrintLog(){
-    for ( auto &[tradeSequence, buyerId, sellerId, instrument, price, quantity]: trades ){
-        std::cout << tradeSequence << ' '  
-        << buyerId << ' ' 
-        << sellerId << ' ' 
-        << instrument << ' ' 
-        << price << ' ' 
-        << quantity << '\n';
-    }
-}

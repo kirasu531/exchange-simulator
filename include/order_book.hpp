@@ -63,13 +63,12 @@ struct OrderBook{
         std::map <int, std::queue <Order>> buy_list;
         std::map <int, std::queue <Order>> sell_list;
         std::unordered_map <int, Order> active_orders;
-        std::unordered_set <int> canceled_orders;
+        std::unordered_set <int> cancelled_orders;
         std::vector <Trade> trades;
 
     public:
         AddOrderResult AddOrder(const Order &newOrder, int &nextTradeNumber);
-        CancelResult RemoveOrder(int Id);
-        std::optional <Order> GetOrder(int Id);
+        CancelResult CancelOrder(int orderId);
+        std::optional <Order> GetOrder(int orderId);
         std::vector <Trade> GetTrades();
-        void PrintLog();
 };

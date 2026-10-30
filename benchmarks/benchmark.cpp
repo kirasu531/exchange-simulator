@@ -1,5 +1,4 @@
 #include "matching_engine.hpp"
-#include "benchmark.hpp"
 
 #include <iostream>
 #include <vector>
@@ -13,7 +12,15 @@ std::mt19937 rng(1337);
 
 #define rnd(l, r) uniform_int_distribution <int> (l, r)(rng)
 
-void PrintTests(const std::vector <Test> &tests){
+struct BenchmarkResult{
+    std::string type;
+    int operations;
+    double medianTime;
+    int totalRuns;
+    int trades;
+};
+
+void PrintTests(const std::vector <BenchmarkResult> &tests){
     std::cout << "Seed: " << 1337 << '\n';
 
     std::cout << std::fixed << std::setprecision(3);
@@ -317,10 +324,10 @@ int main(int argc, char* argv[]){
 
         orders.resize(operationCount);
 
-        std::vector <Test> tests;
+        std::vector <BenchmarkResult> tests;
 
         if ( type == "Resting" ){
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "Resting",
                 .operations = operationCount,
                 .medianTime = RunMostlyResting(runs),
@@ -330,7 +337,7 @@ int main(int argc, char* argv[]){
         }
 
         if ( type == "CancelHeavy" ){
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "CancelHeavy",
                 .operations = operationCount * 2,
                 .medianTime = RunCancelHeavy(runs),
@@ -340,7 +347,7 @@ int main(int argc, char* argv[]){
         }
 
         if ( type == "Random" ){
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "Random",
                 .operations = operationCount,
                 .medianTime = RunRandom(runs),
@@ -350,7 +357,7 @@ int main(int argc, char* argv[]){
         }
 
         if ( type == "MostlyCrossing" ){
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "MostlyCrossing",
                 .operations = operationCount,
                 .medianTime = RunMostlyCrossing(runs),
@@ -360,7 +367,7 @@ int main(int argc, char* argv[]){
         }
 
         if ( type == "LargeSweep" ){
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "LargeSweep",
                 .operations = 5,
                 .medianTime = RunLargeSweep(runs),
@@ -370,7 +377,7 @@ int main(int argc, char* argv[]){
         }
 
         if ( type == "ManyInstruments" ){
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "ManyInstruments",
                 .operations = operationCount,
                 .medianTime = RunManyInstruments(runs),
@@ -381,7 +388,7 @@ int main(int argc, char* argv[]){
 
         PrintTests(tests);
     } else{
-        std::vector <Test> tests;
+        std::vector <BenchmarkResult> tests;
 
         for ( auto curN: {1e4, 1e5, 5e5} ){
             orders.clear();
@@ -389,7 +396,7 @@ int main(int argc, char* argv[]){
             
             int runs = std::min(20, (int)(1e6 / curN * 5));
 
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "Resting",
                 .operations = operationCount,
                 .medianTime = RunMostlyResting(runs),
@@ -397,7 +404,7 @@ int main(int argc, char* argv[]){
                 .trades = totalTrades
             });
 
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "CancelHeavy",
                 .operations = operationCount * 2,
                 .medianTime = RunCancelHeavy(runs),
@@ -405,7 +412,7 @@ int main(int argc, char* argv[]){
                 .trades = totalTrades
             });
 
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "ManyInstruments",
                 .operations = operationCount,
                 .medianTime = RunManyInstruments(runs),
@@ -413,7 +420,7 @@ int main(int argc, char* argv[]){
                 .trades = totalTrades
             });
 
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "Random",
                 .operations = operationCount,
                 .medianTime = RunRandom(runs),
@@ -421,7 +428,7 @@ int main(int argc, char* argv[]){
                 .trades = totalTrades
             });
 
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "MostlyCrossing",
                 .operations = operationCount,
                 .medianTime = RunMostlyCrossing(runs),
@@ -429,7 +436,7 @@ int main(int argc, char* argv[]){
                 .trades = totalTrades
             });
 
-            tests.push_back(Test{
+            tests.push_back(BenchmarkResult{
                 .type = "LargeSweep",
                 .operations = 5,
                 .medianTime = RunLargeSweep(runs),
@@ -438,7 +445,7 @@ int main(int argc, char* argv[]){
             });
         }
 
-        std::sort(begin(tests), end(tests), [&](Test &first, Test &second){
+        std::sort(begin(tests), end(tests), [&](BenchmarkResult &first, BenchmarkResult &second){
             if ( first.type == second.type ){
                 return first.operations < second.operations;
             }

@@ -19,7 +19,7 @@ BATCHES=(
     1000
 )
 
-cmake --build build-release -j > /dev/null
+cmake --build build-release -j 4 > /dev/null
 
 temp_dir=$(mktemp -d)
 log_path="$temp_dir/exchange.log"

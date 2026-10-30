@@ -7,8 +7,6 @@
 #include <cassert>
 #include <cerrno>
 
-constexpr size_t MAX_LINE_SIZE = 256;
-
 RecvLineResult RecvLine(int fd, std::string &pending, std::string &line, void *data, size_t size){
     line.clear();
 
@@ -74,27 +72,6 @@ RecvLineResult RecvLine(int fd, std::string &pending, std::string &line, void *d
     assert(false); // function should never reach it
 }
 
-IOResult RecvAll(int fd, void *data, size_t size){
-    auto bytes = static_cast <char*> (data);
-
-    int received = 0;
-
-    while ( received < size ){
-        ssize_t result = recv(fd, bytes + received, size - received, 0);
-
-        if ( result ==  0 ) return IOResult::Closed;
-        if ( result == -1 ){
-            if ( errno == EINTR ) continue;
-
-            return IOResult::Error;
-        }
-
-        received += result;
-    }
-
-    return IOResult::Success;
-}
-
 IOResult SendAll(int fd, const void *data, size_t size){
     auto bytes = static_cast <const char*> (data);
 
@@ -141,6 +118,62 @@ IOResult WriteAll(int fd, const void* data, size_t size){
         }
 
         written += result;
+    }
+
+    return IOResult::Success;
+}
+
+IOResult Recv(int fd, std::string &pending, void *data, size_t size){
+    auto bytes = static_cast <char*> (data);
+
+    while ( true ){
+        ssize_t result = recv(fd, bytes, size, 0);
+
+        if ( result ==  0 ) return IOResult::Closed;
+        if ( result == -1 ){
+            if ( errno == EINTR ) continue;
+
+            if ( errno == EWOULDBLOCK || errno == EAGAIN ){
+                return IOResult::WouldBlock;
+            }
+
+            return IOResult::Error;
+        }
+
+        for ( int i = 0; i < result; i++ ){
+            pending += *(bytes + i);
+        }
+
+        return IOResult::Success;
+    }
+
+    assert(false); 
+}
+
+IOResult Send(int fd, const void *data, size_t size, size_t &sent){
+    auto bytes = static_cast <const char*> (data);
+
+    while ( sent < size ){
+        ssize_t result = send(
+            fd, 
+            bytes + sent, 
+            size - sent, 
+            MSG_NOSIGNAL
+        );
+
+        if ( result == -1 ){
+            if ( errno == EINTR ) continue;
+
+            if ( errno == EAGAIN || errno == EWOULDBLOCK ){
+                return IOResult::WouldBlock;
+            }
+
+            return IOResult::Error;
+        }
+
+        if ( !result ) return IOResult::Error;
+
+        sent += result;
     }
 
     return IOResult::Success;

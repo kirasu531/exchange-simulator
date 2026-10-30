@@ -10,13 +10,15 @@
 #include <string>
 #include <vector>
 #include <thread>
-#include <functional>
 #include <mutex>
 #include <fstream>
 #include <sstream>
 #include <fcntl.h>
 #include <charconv>
 #include <atomic>
+#include <sys/epoll.h>
+#include <unordered_map>
+#include <iterator>
 
 enum class CommandType{
     Add,
@@ -26,18 +28,18 @@ enum class CommandType{
     Invalid
 };
 
-constexpr size_t MAX_LINE_SIZE = 256;
-
 std::string log_path;
 bool persistence_enabled, log_dirty = false;
 
-int log_fd;
+int log_fd, epfd;
 
 std::mutex log_mutex;
 
 std::atomic <bool> keep_syncing;
 
-std::vector <std::string> divide(const std::string &s){
+std::unordered_map <int, Connection> connections;
+
+std::vector <std::string> tokenize(const std::string &s){
     std::vector <std::string> str;
 
     for ( int i = 0; i < s.size(); i++ ){
@@ -52,7 +54,7 @@ std::vector <std::string> divide(const std::string &s){
             j += 1;
         }
 
-        std::swap(i, j);
+        i = j;
     }
 
     return str;
@@ -84,11 +86,11 @@ bool AppendLogRecord(int fd, const std::string &line){
     return true;
 }
 
-void RunLogSyncLoop(int fd, int T){
+void RunLogSyncLoop(int fd, int interval_ms){
     auto next_sync_time = std::chrono::steady_clock().now();
 
     while ( keep_syncing ){
-        next_sync_time += std::chrono::milliseconds(T);
+        next_sync_time += std::chrono::milliseconds(interval_ms);
         std::this_thread::sleep_until(next_sync_time);
 
         std::lock_guard <std::mutex> lock(log_mutex);
@@ -106,8 +108,8 @@ void RunLogSyncLoop(int fd, int T){
     }
 }
 
-CommandType CheckCommand(const std::string &msg, Order &order){
-    std::vector <std::string> vec = divide(msg);
+CommandType ParseCommand(const std::string &msg, Order &order){
+    std::vector <std::string> vec = tokenize(msg);
 
     if ( vec.empty() ) return CommandType::Invalid;
 
@@ -200,73 +202,6 @@ std::string HandleCommand(MatchingEngine &engine, const Order &order, const Comm
     return "Invalid Query";
 }
 
-void HandleClient(int client_fd, MatchingEngine &engine, std::mutex &engine_mutex){
-    char buffer[MAX_LINE_SIZE];
-
-    std::string pending, line;
-
-    while ( true ){
-        auto receive_result = RecvLine(
-            client_fd,
-            pending,
-            line,
-            buffer,
-            sizeof(buffer)
-        );
-
-        if ( receive_result == RecvLineResult::Closed ){
-            std::cout << "Client disconnected\n";
-            break;
-        }
-
-        if ( receive_result == RecvLineResult::IOError ){
-            perror("receiving from client");
-            break;
-        }
-
-        if ( receive_result == RecvLineResult::TooLarge ){
-            std::cout << "Command size is too large\n";
-            break;
-        }
-
-        Order order;
-        CommandType type = CheckCommand(line, order);
-
-        std::string verdict;
-        bool closeConnection = false;
-
-        if ( type == CommandType::Invalid ){
-            verdict = "Invalid Query";
-        } else{
-            {
-                std::lock_guard <std::mutex> lock(engine_mutex);
-                verdict = HandleCommand(engine, order, type);
-            
-                if ( verdict == "Cancelled" || verdict == "Accepted" ){
-                    std::lock_guard <std::mutex> lock(log_mutex);
-                    
-                    if ( !AppendLogRecord(log_fd, line) ){
-                        verdict = "Persistence Error";
-                        closeConnection = true;
-                    }
-                }
-            }
-        }
-        
-        verdict += '\n';
-        line.clear();
-        
-        if ( SendAll(client_fd, verdict.data(), verdict.size()) == IOResult::Error ){
-            perror("sending to client");
-            break;
-        }
-
-        if ( closeConnection ) break;
-    }
-        
-    close(client_fd);
-}
-
 void RestoreLog(const std::string &filename, MatchingEngine &engine){
     if ( !persistence_enabled ) return; 
 
@@ -278,22 +213,22 @@ void RestoreLog(const std::string &filename, MatchingEngine &engine){
         if ( file.eof() ) continue;
 
         std::istringstream input(line);
-        
-        std::string type, extra;
 
-        if ( !(input >> type) ) continue;
+        std::string command, extra;
 
-        if ( type == "ADD" ){
+        if ( !(input >> command) ) continue;
+
+        if ( command == "ADD" ){
             Order order;
-            std::string side, type;
+            std::string side, order_type;
 
-            if ( !(input 
-                >> order.orderId 
-                >> order.price 
-                >> order.quantity 
-                >> side 
-                >> type
-                >> order.instrument) 
+            if ( !(input
+                >> order.orderId
+                >> order.price
+                >> order.quantity
+                >> side
+                >> order_type
+                >> order.instrument)
             ){
                 continue;
             }
@@ -302,14 +237,14 @@ void RestoreLog(const std::string &filename, MatchingEngine &engine){
             else if ( side == "SELL" ) order.side = Side::Sell;
             else continue;
 
-            if ( type == "LIMIT" ) order.type = OrderType::Limit;
-            else if ( type == "MARKET" ) order.type = OrderType::Market;
+            if ( order_type == "LIMIT" ) order.type = OrderType::Limit;
+            else if ( order_type == "MARKET" ) order.type = OrderType::Market;
             else continue;
 
             if ( input >> extra ) continue;
-            
+
             engine.AddOrder(order);
-        } else if ( type == "CANCEL" ){
+        } else if ( command == "CANCEL" ){
             int orderId; 
             
             if ( !(input >> orderId) ) continue;
@@ -392,7 +327,11 @@ int main(int argc, char *argv[]){
         keep_syncing = true;
     }
 
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int server_fd = socket(
+        AF_INET, 
+        SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 
+        0
+    );
 
     if ( server_fd == -1 ){
         perror("socket");
@@ -400,7 +339,7 @@ int main(int argc, char *argv[]){
     }
 
     int opt = 1;
-    int setSocket_result = setsockopt(
+    int setsockopt_result = setsockopt(
         server_fd,
         SOL_SOCKET,
         SO_REUSEADDR,
@@ -408,7 +347,7 @@ int main(int argc, char *argv[]){
         sizeof(opt)
     );
 
-    if ( setSocket_result == -1 ){
+    if ( setsockopt_result == -1 ){
         perror("setsockopt");
         return 1;
     }
@@ -430,10 +369,33 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    int listen_verdict = listen(server_fd, 3);
+    int listen_verdict = listen(server_fd, SOMAXCONN);
 
     if ( listen_verdict != 0 ){
         perror("listen");
+        return 1;
+    }
+
+    epfd = epoll_create1(EPOLL_CLOEXEC);
+
+    if ( epfd == -1 ){
+        perror("epoll_create1");
+        return 1;
+    }
+
+    epoll_event event{};
+    event.events = EPOLLIN;
+    event.data.fd = server_fd;
+
+    if ( epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &event) == -1 ){
+        perror("epoll_ctl");
+        return 1;
+    }
+
+    int flags = fcntl(server_fd, F_GETFL);
+    
+    if ( flags == -1 || fcntl(server_fd, F_SETFL, flags | O_NONBLOCK) == -1 ){
+        perror("fcntl");
         return 1;
     }
 
@@ -461,31 +423,193 @@ int main(int argc, char *argv[]){
 
     RestoreLog(log_path, engine);
 
+    epoll_event events[1024];
+
+    char data_read[READ_BUDGET];
+
     while ( true ){
-        std::cout << "Waiting for client...\n";
+        int count = epoll_wait(epfd, events, std::size(events), -1);
 
-        sockaddr_in client_address;
-        socklen_t client_address_size = sizeof(client_address);
+        if ( count == -1 ){
+            if ( errno == EINTR ) continue;
 
-        int client_fd = accept(
-            server_fd, 
-            reinterpret_cast <sockaddr*> (&client_address), 
-            &client_address_size
-        );
-
-        if ( client_fd == -1 ){
-            perror("accept");
-            continue;
+            perror("epoll_wait");
+            break;
         }
 
-        std::cout << "Client connected\n";
+        for ( int i = 0; i < count; i++ ){
+            int fd = events[i].data.fd;
+            u_int32_t event_flags = events[i].events;
 
-        std::thread(
-            HandleClient,
-            client_fd,
-            std::ref(engine),
-            std::ref(engine_mutex)
-        ).detach();
+            if ( fd == server_fd ){ // listen
+                while ( true ){
+                    int client_fd = accept4(
+                        server_fd, 
+                        nullptr,
+                        nullptr,
+                        SOCK_NONBLOCK | SOCK_CLOEXEC
+                    );
+
+                    if ( client_fd == -1 ){
+                        if ( errno == EINTR ) continue;
+
+                        if ( errno != EAGAIN && errno != EWOULDBLOCK ){
+                            perror("accept4");
+                        }
+
+                        break;
+                    }
+
+                    epoll_event ev{};
+                    ev.events = EPOLLIN;
+                    ev.data.fd = client_fd;
+
+                    if ( epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &ev) == -1 ){
+                        perror("epoll_ctl add");
+                        close(client_fd);
+                        continue;
+                    }
+
+                    std::cout << "Client connected\n";
+
+                    connections[client_fd] = Connection();
+                }
+            } else{
+                auto it = connections.find(fd);
+
+                if ( it == connections.end() ){
+                    assert(false && "Unknown client fd");
+                    continue;
+                }
+                
+                bool alive = true;
+
+                if ( event_flags & EPOLLERR ) alive = false;
+
+                if ( alive && (event_flags & (EPOLLIN | EPOLLHUP)) ){
+                    auto result = Recv(
+                        fd, 
+                        connections[fd].input_buffer,
+                        data_read,
+                        sizeof(data_read)
+                    );
+
+                    if ( result == IOResult::Closed ){
+                        alive = false;
+                    } 
+                    else if ( result == IOResult::Error ){
+                        perror("Recv");
+                        alive = false;
+                    } 
+                    else{
+                        std::string &input = connections[fd].input_buffer;
+                        std::string pending;
+
+                        for ( size_t i = 0; i < input.size() && alive; i++ ){
+                            if ( input[i] == '\n' ){
+                                while ( !pending.empty() && pending.back() == '\r' ){
+                                    pending.pop_back();
+                                }
+
+                                Order order;
+                                CommandType type = ParseCommand(pending, order);
+
+                                std::string verdict;
+
+                                if ( type == CommandType::Invalid ){
+                                    verdict = "Invalid Query";
+                                } else{
+                                    {
+                                        std::lock_guard <std::mutex> lock(engine_mutex);
+                                        verdict = HandleCommand(engine, order, type);
+                                    
+                                        if ( verdict == "Cancelled" || verdict == "Accepted" ){
+                                            std::lock_guard <std::mutex> lock(log_mutex);
+                                            
+                                            if ( !AppendLogRecord(log_fd, pending) ){
+                                                verdict = "Persistence Error";
+                                                alive = false;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                connections[fd].output_buffer += verdict + '\n';
+                                pending.clear();
+
+                                if ( connections[fd].pendingBytes() > PENDING_OUTPUT_LIMIT ){
+                                    alive = false;
+                                }
+                            } else{
+                                pending += input[i];
+
+                                if ( pending.size() > MAX_LINE_SIZE ) alive = false;
+                            }
+                        }
+
+                        std::swap(pending, input);
+                    }
+                }
+
+                if ( alive && (event_flags & EPOLLOUT) ){
+                    auto &client = connections[fd];
+                    size_t sent = 0;
+
+                    IOResult result = Send(
+                        fd, 
+                        client.getSendData(), 
+                        std::min(SEND_BUDGET, client.pendingBytes()), 
+                        sent
+                    );
+
+                    if ( result == IOResult::Closed ){
+                        alive = false;
+                    } 
+                    else if ( result == IOResult::Error ){
+                        perror("Send");
+                        alive = false;
+                    }
+                    else{
+                        client.sent_offset += sent;
+                    }
+                }
+
+                if ( alive == true ){
+                    bool has_pending_output = connections[fd].hasPendingData();
+
+                    if ( has_pending_output != connections[fd].watching_output ){
+                        epoll_event ev{};
+                        ev.events = EPOLLIN;
+                        ev.data.fd = fd;
+
+                        if ( has_pending_output ) ev.events |= EPOLLOUT;
+
+                        if ( epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev) == -1 ){
+                            perror("epoll_ctl MOD");
+                            alive = false;
+                        }
+
+                        connections[fd].watching_output = has_pending_output;
+                    }
+
+                    if ( !has_pending_output ){
+                        connections[fd].output_buffer.clear();
+                        connections[fd].sent_offset = 0;
+                    }
+                }
+
+                if ( !alive ){
+                    if ( epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr) == -1 ){
+                        perror("epoll_ctl DEL");
+                    }
+
+                    if ( close(fd) == -1 ) perror("close client");
+
+                    std::cout << "Client disconnected/closed\n";
+                    connections.erase(it);
+                }
+            }
+        }
     }
 
     keep_syncing = false;

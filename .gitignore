@@ -7,16 +7,13 @@ build-ubsan/
 build-sanitize/
 build-tsan/
 
-# Random directory
+# CTest output directory
 Testing/
 
 # Profiling output
 gmon.out
 
-# Temporary / scratch files
-test_creating.txt
-index.html
-workflow
+# Runtime artifacts
 exchange.log
 
 # Accidental local binaries

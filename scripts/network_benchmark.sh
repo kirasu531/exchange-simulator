@@ -49,7 +49,7 @@ run_once() {
     workload="$1"
     operations="$2"
 
-    ./build-release/exchange_server "$PORT" > /dev/null 2>&1 &
+    ./build-release/exchange_server "--port" "$PORT" > /dev/null 2>&1 &
     server_pid=$!
 
     sleep 0.1
