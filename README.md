@@ -52,18 +52,23 @@ The project progresses through matching-engine correctness, performance profilin
                  TCP clients
                /      |      \
               /       |       \
-        [accept4]  conn fd   conn fd          <- one epoll_wait loop
-              \       |       /
+        [accept4]  conn fd   conn fd      <- one epoll_wait loop
+              \       |       /               (EPOLLIN / EPOLLOUT)
+               \      |      /
         input_buffer -> ParseCommand -> verdict -> output_buffer
-                        (per-connection state, EPOLLIN/EPOLLOUT)
+                            (per-connection state)
                               |
-                        MatchingEngine --------> subscribers[instrument]
-                              |                      |
-                  +-----------+-----------+     EVENT fan-out
-                  |           |           |
-              OrderBook   OrderBook      ...
-                BTC         AAPL
+              +---------------+-----------------+
+              |                                 |
+        MatchingEngine                     subscriptions:
+              |                            instrument -> fd set
+      +-------+-------+                         |
+      |       |       |                  new trades fan out as
+  OrderBook OrderBook ...               EVENT lines into each
+    BTC     AAPL                     subscriber's output_buffer
 ```
+
+The event loop owns subscriptions and broadcast — the engine only produces trades. Successful state-changing commands are additionally appended to the optional command log; a background thread can periodically `fdatasync()` it.
 
 `MatchingEngine` owns global order/trade sequencing and routes orders to per-instrument `OrderBook`s.
 
