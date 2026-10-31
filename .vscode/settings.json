@@ -3,5 +3,9 @@
     "github.copilot.enable": {
         "*": false
     },
-    "github.copilot.nextEditSuggestions.enabled": false
+    "github.copilot.nextEditSuggestions.enabled": false,
+    "editor.tabCompletion": "on",
+    "editor.suggestSelection": "first",
+    "errorLens.delay": 1500,
+    "errorLens.delayMode": "debounce"
 }

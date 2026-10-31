@@ -30,6 +30,15 @@ The project progresses through matching-engine correctness, performance profilin
 - Newline-delimited text protocol with CRLF tolerance
 - Input validation and error responses
 
+### Market data (V0.6)
+
+- Per-instrument `SUBSCRIBE` / `UNSUBSCRIBE` on the same connection as order entry
+- `EVENT TRADE` messages pushed to all subscribers of an instrument whenever a match occurs
+- Events interleave with normal request/reply traffic on one connection
+- Fan-out honors the same backpressure rules as replies: subscribers past `PENDING_OUTPUT_LIMIT` are dropped
+- Subscriptions live only for the connection's lifetime and are cleaned up on disconnect
+- New subscribers receive only future events — no snapshot or history replay
+
 ### Persistence (V0.4)
 
 - Optional append-only logging of successful state-changing commands
@@ -48,9 +57,9 @@ The project progresses through matching-engine correctness, performance profilin
         input_buffer -> ParseCommand -> verdict -> output_buffer
                         (per-connection state, EPOLLIN/EPOLLOUT)
                               |
-                        MatchingEngine
-                              |
-                  +-----------+-----------+
+                        MatchingEngine --------> subscribers[instrument]
+                              |                      |
+                  +-----------+-----------+     EVENT fan-out
                   |           |           |
               OrderBook   OrderBook      ...
                 BTC         AAPL
@@ -77,6 +86,8 @@ ADD <orderId> <price> <quantity> <BUY|SELL> <LIMIT|MARKET> <instrument>
 CANCEL <orderId>
 GET <orderId>
 TRADES
+SUBSCRIBE <instrument>
+UNSUBSCRIBE <instrument>
 ```
 
 Examples:
@@ -96,13 +107,23 @@ Accepted                                 order accepted
 Duplicate Id                             orderId already registered
 Cancelled                                order cancelled
 Not Found                                order not active (GET / CANCEL)
+Subscribed                               SUBSCRIBE accepted
+Already subscribed                       SUBSCRIBE on an active subscription
+Unsubscribed                             UNSUBSCRIBE accepted
+Not Subscribed                           UNSUBSCRIBE with no matching subscription
 Invalid Query                            malformed or invalid command
 <orderId> <price> <qty> <Side> <Type> <instrument>    GET response
 <count>                                  TRADES response
 Persistence Error                        log write failed; connection closed
 ```
 
-The server reconstructs complete commands even when TCP splits or combines transmitted byte chunks. A connection sending a line longer than 256 bytes, or accumulating more than 64 KiB of unread output, is dropped without an error reply.
+Pushed messages (not tied to a request):
+
+```text
+EVENT TRADE <instrument> <tradeSeq> <buyerId> <sellerId> <price> <qty>
+```
+
+The server reconstructs complete commands even when TCP splits or combines transmitted byte chunks. A connection sending a line longer than 256 bytes, or accumulating more than 64 KiB of unread output (replies or pushed events), is dropped without an error reply.
 
 ## Project Structure
 
@@ -191,6 +212,7 @@ Suites:
 | `epoll_edge_cases` | fragmented delivery, pipelining, backpressure limits, client churn, half-close behavior |
 | `recovery_integration` | log contents, restart replay, malformed-line and torn-tail handling, multi-restart |
 | `server_cli` | command-line argument validation |
+| `market_data` | subscribe/unsubscribe replies, event fan-out, instrument filtering, ordering, disconnect cleanup |
 
 Additional validation is performed with:
 
@@ -276,11 +298,16 @@ V0.4  Append-only persistence, recovery, periodic fdatasync,
 V0.5  Single-threaded epoll event loop: non-blocking I/O,
       per-connection buffering, EPOLLOUT backpressure,
       and protocol/edge-case/CLI test suites
+  ↓
+V0.6  Market-data subscriptions: per-instrument SUBSCRIBE,
+      EVENT TRADE fan-out, and backpressure for pushed events
 ```
 
 ## Known Limitations
 
 - A client that half-closes with `shutdown(SHUT_WR)` never receives queued replies; the server drops the connection on EOF before flushing output (no `EPOLLRDHUP` handling).
+- New subscribers get no snapshot or backlog — only events produced after `SUBSCRIBE` arrive.
+- `subscribers` keeps an (empty) set per instrument ever subscribed to; it is never garbage-collected.
 - Order IDs are never reusable — a cancelled or filled id stays registered forever.
 - Cancelled orders occupy their price-level queues until a crossing match skips them, and `cancelled_orders` grows without bound over the engine's lifetime.
 - A log record written without a trailing newline (e.g. a torn final write) is skipped during replay.
@@ -302,6 +329,6 @@ V0.5  Single-threaded epoll event loop: non-blocking I/O,
 
 ## Status
 
-**V0.5**
+**V0.6**
 
-The current version provides a single-threaded `epoll`-driven TCP matching engine with per-connection buffering and backpressure limits, optional persistent command logging, startup recovery, and configurable periodic disk synchronization. It remains an educational system; crash-atomic transactions, production-grade failure recovery, and multi-threaded matching are outside its scope.
+The current version provides a single-threaded `epoll`-driven TCP matching engine with per-connection buffering and backpressure limits, per-instrument market-data subscriptions with `EVENT TRADE` fan-out, optional persistent command logging, startup recovery, and configurable periodic disk synchronization. It remains an educational system; crash-atomic transactions, production-grade failure recovery, and multi-threaded matching are outside its scope.

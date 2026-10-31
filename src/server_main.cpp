@@ -19,25 +19,35 @@
 #include <sys/epoll.h>
 #include <unordered_map>
 #include <iterator>
+#include <set>
 
 enum class CommandType{
     Add,
     Cancel,
     Get,
     Trades,
+    Subscribe,
+    Unsubscribe,
     Invalid
 };
 
+// persistence
 std::string log_path;
-bool persistence_enabled, log_dirty = false;
-
-int log_fd, epfd;
+int log_fd;
+bool persistence_enabled = false, log_dirty = false;
 
 std::mutex log_mutex;
-
 std::atomic <bool> keep_syncing;
 
+// epoll
+int epfd;
+
+// live connections and their instrument subscriptions
 std::unordered_map <int, Connection> connections;
+std::unordered_map <std::string, std::set <int>> subscribers;
+
+// trades produced by the command currently being handled, staged for broadcast
+std::vector <Trade> recent_trades;
 
 std::vector <std::string> tokenize(const std::string &s){
     std::vector <std::string> str;
@@ -159,12 +169,32 @@ CommandType ParseCommand(const std::string &msg, Order &order){
         return CommandType::Trades;
     }
 
+    if ( vec[0] == "SUBSCRIBE" ){
+        if ( vec.size() != 2 ) return CommandType::Invalid;
+
+        order.instrument = vec[1];
+
+        return CommandType::Subscribe;
+    }
+
+    if ( vec[0] == "UNSUBSCRIBE" ){
+        if ( vec.size() != 2 ) return CommandType::Invalid;
+
+        order.instrument = vec[1];
+
+        return CommandType::Unsubscribe;
+    }
+
     return CommandType::Invalid;
 }
 
 std::string HandleCommand(MatchingEngine &engine, const Order &order, const CommandType &type){
     if ( type == CommandType::Add ){
+        size_t trades_before = engine.GetTradeCount(order.instrument);
+
         auto verdict = engine.AddOrder(order);
+
+        recent_trades = engine.GetTradesFrom(order.instrument, trades_before);
 
         if ( verdict == AddOrderResult::Accepted ) return "Accepted";
         if ( verdict == AddOrderResult::DuplicateId ) return "Duplicate Id";
@@ -200,6 +230,35 @@ std::string HandleCommand(MatchingEngine &engine, const Order &order, const Comm
     }
 
     return "Invalid Query";
+}
+
+bool UpdateClientEpoll(int fd){
+    auto &client = connections.at(fd);
+    bool alive = true;
+
+    bool has_pending_output = client.hasPendingData();
+
+    if ( has_pending_output != client.watching_output ){
+        epoll_event ev{};
+        ev.events = EPOLLIN;
+        ev.data.fd = fd;
+
+        if ( has_pending_output ) ev.events |= EPOLLOUT;
+
+        if ( epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev) == -1 ){
+            perror("epoll_ctl MOD");
+            alive = false;
+        }
+
+        client.watching_output = has_pending_output;
+    }
+
+    if ( !has_pending_output ){
+        client.output_buffer.clear();
+        client.sent_offset = 0;
+    }
+
+    return alive;
 }
 
 void RestoreLog(const std::string &filename, MatchingEngine &engine){
@@ -437,9 +496,11 @@ int main(int argc, char *argv[]){
             break;
         }
 
+        std::vector <int> disconnect_list;
+
         for ( int i = 0; i < count; i++ ){
             int fd = events[i].data.fd;
-            u_int32_t event_flags = events[i].events;
+            uint32_t event_flags = events[i].events;
 
             if ( fd == server_fd ){ // listen
                 while ( true ){
@@ -481,15 +542,16 @@ int main(int argc, char *argv[]){
                     assert(false && "Unknown client fd");
                     continue;
                 }
-                
+
+                auto &client = it -> second;
                 bool alive = true;
 
                 if ( event_flags & EPOLLERR ) alive = false;
 
                 if ( alive && (event_flags & (EPOLLIN | EPOLLHUP)) ){
                     auto result = Recv(
-                        fd, 
-                        connections[fd].input_buffer,
+                        fd,
+                        client.input_buffer,
                         data_read,
                         sizeof(data_read)
                     );
@@ -502,7 +564,7 @@ int main(int argc, char *argv[]){
                         alive = false;
                     } 
                     else{
-                        std::string &input = connections[fd].input_buffer;
+                        std::string &input = client.input_buffer;
                         std::string pending;
 
                         for ( size_t i = 0; i < input.size() && alive; i++ ){
@@ -515,10 +577,34 @@ int main(int argc, char *argv[]){
                                 CommandType type = ParseCommand(pending, order);
 
                                 std::string verdict;
+                                recent_trades.clear();
 
                                 if ( type == CommandType::Invalid ){
                                     verdict = "Invalid Query";
-                                } else{
+                                }
+                                else if ( type == CommandType::Subscribe ){
+                                    auto &set = subscribers[order.instrument];
+
+                                    if ( set.contains(fd) ){
+                                        verdict = "Already subscribed";
+                                    } else{
+                                        set.insert(fd);
+                                        client.subscriptions.insert(order.instrument);
+                                        verdict = "Subscribed";
+                                    }
+                                }
+                                else if ( type == CommandType::Unsubscribe ){
+                                    auto sub_it = subscribers.find(order.instrument);
+
+                                    if ( sub_it == subscribers.end() || !sub_it -> second.contains(fd) ){
+                                        verdict = "Not Subscribed";
+                                    } else{
+                                        sub_it -> second.erase(fd);
+                                        client.subscriptions.erase(order.instrument);
+                                        verdict = "Unsubscribed";
+                                    }
+                                }
+                                else{
                                     {
                                         std::lock_guard <std::mutex> lock(engine_mutex);
                                         verdict = HandleCommand(engine, order, type);
@@ -534,10 +620,28 @@ int main(int argc, char *argv[]){
                                     }
                                 }
                                 
-                                connections[fd].output_buffer += verdict + '\n';
+                                client.output_buffer += verdict + '\n';
                                 pending.clear();
 
-                                if ( connections[fd].pendingBytes() > PENDING_OUTPUT_LIMIT ){
+                                if ( !recent_trades.empty() ){
+                                    auto sub_it = subscribers.find(order.instrument);
+
+                                    if ( sub_it != subscribers.end() ){
+                                        for ( auto &client_fd: sub_it -> second ){
+                                            for ( auto &trade: recent_trades ){
+                                                connections[client_fd].output_buffer += "EVENT " + trade.to_string() + '\n';
+                                            }
+
+                                            if ( connections[client_fd].pendingBytes() > PENDING_OUTPUT_LIMIT ||
+                                                    !UpdateClientEpoll(client_fd) 
+                                            ){
+                                                disconnect_list.push_back(client_fd);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if ( client.pendingBytes() > PENDING_OUTPUT_LIMIT ){
                                     alive = false;
                                 }
                             } else{
@@ -552,7 +656,6 @@ int main(int argc, char *argv[]){
                 }
 
                 if ( alive && (event_flags & EPOLLOUT) ){
-                    auto &client = connections[fd];
                     size_t sent = 0;
 
                     IOResult result = Send(
@@ -575,40 +678,30 @@ int main(int argc, char *argv[]){
                 }
 
                 if ( alive == true ){
-                    bool has_pending_output = connections[fd].hasPendingData();
-
-                    if ( has_pending_output != connections[fd].watching_output ){
-                        epoll_event ev{};
-                        ev.events = EPOLLIN;
-                        ev.data.fd = fd;
-
-                        if ( has_pending_output ) ev.events |= EPOLLOUT;
-
-                        if ( epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev) == -1 ){
-                            perror("epoll_ctl MOD");
-                            alive = false;
-                        }
-
-                        connections[fd].watching_output = has_pending_output;
-                    }
-
-                    if ( !has_pending_output ){
-                        connections[fd].output_buffer.clear();
-                        connections[fd].sent_offset = 0;
-                    }
+                    alive = UpdateClientEpoll(fd);
                 }
 
-                if ( !alive ){
-                    if ( epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr) == -1 ){
-                        perror("epoll_ctl DEL");
-                    }
-
-                    if ( close(fd) == -1 ) perror("close client");
-
-                    std::cout << "Client disconnected/closed\n";
-                    connections.erase(it);
-                }
+                if ( !alive ) disconnect_list.push_back(fd);
             }
+        }
+
+        for ( auto &client_fd: disconnect_list ){
+            auto it = connections.find(client_fd);
+
+            if ( it == connections.end() ) continue;
+
+            for ( auto &instrument: it -> second.subscriptions ){
+                subscribers[instrument].erase(client_fd);
+            }
+
+            if ( epoll_ctl(epfd, EPOLL_CTL_DEL, client_fd, nullptr) == -1 ){
+                perror("epoll_ctl DEL");
+            }
+
+            if ( close(client_fd) == -1 ) perror("close client");
+
+            std::cout << "Client disconnected/closed\n";
+            connections.erase(it);
         }
     }
 

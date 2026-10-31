@@ -21,4 +21,6 @@ struct MatchingEngine{
         std:: optional <Order> GetOrder(int orderId);
         std:: vector <Trade> GetTrades();
         void PrintTrades();
+        size_t GetTradeCount(const std::string &instrument);
+        std::vector <Trade> GetTradesFrom(const std::string &instrument, size_t start);
 };

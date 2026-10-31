@@ -12,12 +12,10 @@ AddOrderResult MatchingEngine::AddOrder(const Order &newOrder){
     auto incoming = newOrder;
 
     incoming.arrivalSequence = nextSequence++;
-    
+
     order_instruments[incoming.orderId] = incoming.instrument;
 
-    books[incoming.instrument].AddOrder(incoming, nextTradeNumber);
-
-    return AddOrderResult::Accepted;
+    return books[incoming.instrument].AddOrder(incoming, nextTradeNumber);
 }
 
 CancelResult MatchingEngine::CancelOrder(int orderId){
@@ -55,3 +53,20 @@ void MatchingEngine::PrintTrades(){
         trade.printTrade();
     }
 }
+
+size_t MatchingEngine::GetTradeCount(const std::string &instrument){
+    auto it = books.find(instrument);
+
+    if ( it == books.end() ) return {};
+
+    return it -> second.GetTradeCount();
+}
+
+std::vector <Trade> MatchingEngine::GetTradesFrom(const std::string &instrument, size_t start){
+    auto it = books.find(instrument);
+
+    if ( it == books.end() ) return {};
+
+    return it -> second.GetTradesFrom(start);
+}
+

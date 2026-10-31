@@ -135,7 +135,7 @@ int main(int argc, char *argv[]){
 
         for ( int i = 0; i < count; i++ ){
             int fd = events[i].data.fd;
-            u_int32_t event_flags = events[i].events;
+            uint32_t event_flags = events[i].events;
 
             if ( fd == client_fd ){
                 if ( event_flags & EPOLLIN ){

@@ -172,3 +172,15 @@ std:: optional <Order> OrderBook::GetOrder(int orderId){
 }
 
 std::vector <Trade> OrderBook::GetTrades(){ return trades; } 
+
+size_t OrderBook::GetTradeCount(){ return trades.size(); }
+
+std::vector <Trade> OrderBook::GetTradesFrom(size_t start){
+    std::vector <Trade> new_trades;
+
+    for ( size_t i = start; i < trades.size(); i++ ){
+        new_trades.push_back(trades[i]);
+    }
+
+    return new_trades;
+}

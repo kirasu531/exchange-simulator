@@ -2,10 +2,8 @@
 
 #include "trade.hpp"
 
-#include <iostream>
 #include <cassert>
 #include <map>
-#include <set>
 #include <vector>
 #include <string>
 #include <optional>
@@ -71,4 +69,6 @@ struct OrderBook{
         CancelResult CancelOrder(int orderId);
         std::optional <Order> GetOrder(int orderId);
         std::vector <Trade> GetTrades();
+        size_t GetTradeCount();
+        std::vector <Trade> GetTradesFrom(size_t start);
 };

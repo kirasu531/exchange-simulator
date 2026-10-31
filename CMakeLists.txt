@@ -140,3 +140,16 @@ set_tests_properties(
     PROPERTIES TIMEOUT 15
 )
 
+add_test(
+    NAME market_data
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tests/market_data.py
+        $<TARGET_FILE:exchange_server>
+)
+
+set_tests_properties(
+    market_data
+    PROPERTIES TIMEOUT 90
+)
+

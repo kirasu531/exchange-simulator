@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <set>
 
 enum class IOResult {
     Success,
@@ -35,6 +36,7 @@ struct Connection{
     std::string input_buffer;
     std::string output_buffer;
     size_t sent_offset = 0;
+    std::set <std::string> subscriptions;
     
     bool watching_output = false;
 
