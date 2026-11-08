@@ -12,7 +12,7 @@
 #include <sys/epoll.h>
 #include <iterator>
 
-char data_read[READ_BUDGET];
+char read_buffer[READ_BUDGET];
 
 bool ParseInt(const std::string& s, int& value) {
     if ( s.empty() ) return false;
@@ -76,13 +76,13 @@ int main(int argc, char *argv[]){
     address.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     while ( true ){
-        int connect_verdict = connect(
+        int connect_result = connect(
             client_fd, 
             reinterpret_cast <const sockaddr*> (&address), 
             sizeof(address)
         );
 
-        if ( connect_verdict == -1 ){
+        if ( connect_result == -1 ){
             if ( errno == EINPROGRESS ) continue;
 
             perror("connect");
@@ -142,8 +142,8 @@ int main(int argc, char *argv[]){
                     auto result = Recv(
                         client_fd,
                         client.input_buffer,
-                        data_read,
-                        sizeof(data_read)
+                        read_buffer,
+                        sizeof(read_buffer)
                     );
 
                     if ( result == IOResult::Closed ){

@@ -28,6 +28,11 @@ add_library(exchange_core
 add_library(network_utils
     src/network_utils.cpp
 )
+add_library(server_lib
+    src/protocol.cpp
+    src/persistent_log.cpp
+    src/client_manager.cpp
+)
 
 add_executable(exchange
     src/main.cpp
@@ -57,6 +62,7 @@ add_executable(logsync_bench
 
 target_include_directories(exchange_core PUBLIC include)
 target_include_directories(network_utils PUBLIC include)
+target_include_directories(server_lib PUBLIC include)
 
 target_link_libraries(exchange_bench PRIVATE exchange_core)
 target_link_libraries(exchange PRIVATE exchange_core)
@@ -65,7 +71,8 @@ target_link_libraries(exchange_tests PRIVATE
 	network_utils
 	Catch2::Catch2WithMain
 )
-target_link_libraries(exchange_server PRIVATE exchange_core network_utils)
+target_link_libraries(exchange_server PRIVATE exchange_core network_utils server_lib)
+target_link_libraries(server_lib PUBLIC exchange_core network_utils)
 target_link_libraries(exchange_client PRIVATE network_utils)
 target_link_libraries(exchange_network PRIVATE exchange_core network_utils)
 target_link_libraries(exchange_durability PRIVATE exchange_core network_utils)
